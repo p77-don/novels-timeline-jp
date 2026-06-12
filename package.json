@@ -1,0 +1,24 @@
+{
+  "name": "novels-timeline-jp",
+  "version": "1.0.0",
+  "description": "小説の出来事を時系列で可視化するObsidianプラグイン",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node esbuild.config.mjs production",
+    "dev": "node esbuild.config.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0",
+    "obsidian": "^1.4.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "fuse.js": "^7.0.0",
+    "js-yaml": "^4.1.0"
+  }
+}

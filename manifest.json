@@ -1,0 +1,11 @@
+{
+  "id": "novels-timeline-jp",
+  "name": "Novels Timeline JP",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "小説の出来事を時系列で可視化し、物語構造を俯瞰するタイムラインビューアー",
+  "author": "novels-timeline-jp",
+  "authorUrl": "",
+  "fundingUrl": "",
+  "isDesktopOnly": true
+}

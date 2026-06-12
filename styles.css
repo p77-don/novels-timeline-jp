@@ -1,0 +1,855 @@
+/* ============================================================
+   Novels Timeline JP — スタイルシート
+   Obsidian の CSS 変数を使用し、Light/Dark 両対応
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   メインビュー
+   ------------------------------------------------------------ */
+
+.ntj-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+}
+
+/* ------------------------------------------------------------
+   ツールバー
+   ------------------------------------------------------------ */
+
+.ntj-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.ntj-search {
+  flex: 1;
+  min-width: 120px;
+  max-width: 240px;
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 13px;
+}
+
+.ntj-search:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.ntj-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ntj-btn:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.ntj-btn.is-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+/* ------------------------------------------------------------
+   タイムラインエリア
+   ------------------------------------------------------------ */
+
+.ntj-timeline {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;   /* 横スクロール有効 */
+  position: relative;
+  cursor: default;
+}
+
+.ntj-timeline svg {
+  display: block;
+}
+
+/* ------------------------------------------------------------
+   ノード
+   ------------------------------------------------------------ */
+
+.ntj-node {
+  transition: opacity 0.15s ease;
+}
+
+.ntj-node:hover circle {
+  filter: brightness(1.2);
+}
+
+/* ドラッグ中 */
+.ntj-node.is-dragging {
+  cursor: grabbing;
+  opacity: 0.8;
+}
+
+/* ------------------------------------------------------------
+   Tooltip
+   ------------------------------------------------------------ */
+
+.ntj-tooltip {
+  position: fixed;
+  z-index: 9999;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  min-width: 160px;
+  max-width: 280px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ntj-tooltip-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ntj-tooltip-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.ntj-tooltip-label {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+/* ------------------------------------------------------------
+   Popover
+   ------------------------------------------------------------ */
+
+.ntj-popover {
+  position: fixed;
+  z-index: 9998;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 0;
+  min-width: 220px;
+  max-width: 320px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow: hidden;
+}
+
+.ntj-popover-title {
+  font-weight: 600;
+  font-size: 14px;
+  padding: 12px 16px 10px;
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+}
+
+.ntj-popover-divider {
+  margin: 0;
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.ntj-popover-row {
+  display: flex;
+  gap: 8px;
+  padding: 4px 16px;
+  color: var(--text-muted);
+}
+
+.ntj-popover-section {
+  padding: 4px 16px 8px;
+}
+
+.ntj-popover-label {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+
+.ntj-popover-item {
+  color: var(--text-normal);
+  padding: 1px 0;
+}
+
+.ntj-popover-link {
+  color: var(--text-accent);
+  padding: 2px 0;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  cursor: pointer;
+}
+
+.ntj-popover-link:hover {
+  text-decoration-color: var(--text-accent);
+}
+
+/* ------------------------------------------------------------
+   Gap
+   ------------------------------------------------------------ */
+
+.ntj-gap {
+  opacity: 0.85;
+  transition: opacity 0.15s ease;
+}
+
+.ntj-gap:hover {
+  opacity: 1;
+}
+
+/* ------------------------------------------------------------
+   暦設定テーブル（設定画面）
+   ------------------------------------------------------------ */
+
+.ntj-calendar-table {
+  margin: 8px 0 12px;
+  overflow-x: auto;
+}
+
+.ntj-calendar-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.ntj-calendar-table th,
+.ntj-calendar-table td {
+  padding: 5px 10px;
+  border: 1px solid var(--background-modifier-border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.ntj-calendar-table th {
+  background-color: var(--background-secondary);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ntj-calendar-table input[type="text"],
+.ntj-calendar-table input[type="number"] {
+  padding: 3px 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 13px;
+}
+
+.ntj-calendar-table input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.ntj-calendar-table button {
+  padding: 2px 7px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.ntj-calendar-table button:hover {
+  background-color: var(--background-modifier-error);
+  color: var(--text-on-accent);
+  border-color: var(--background-modifier-error);
+}
+
+/* ------------------------------------------------------------
+   デバッグ情報オーバーレイ（Debug Mode）
+   ------------------------------------------------------------ */
+
+.ntj-debug-overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background-color: rgba(0, 0, 0, 0.72);
+  color: #00ff88;
+  font-family: monospace;
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 100;
+  line-height: 1.8;
+}
+
+/* ============================================================
+   メインエリア（サイドパネル + タイムライン の横並び）
+   ============================================================ */
+
+.ntj-main-area {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.ntj-main-area > .ntj-timeline {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* ============================================================
+   左サイドパネル（汎用スライドインパネル）
+   ============================================================ */
+
+.ntj-side-panel {
+  display: none;
+  flex-direction: column;
+  width: 280px;
+  min-width: 220px;
+  max-width: 360px;
+  background-color: var(--background-secondary);
+  border-right: 1px solid var(--background-modifier-border);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+/* パネルヘッダー */
+.ntj-sp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  flex-shrink: 0;
+}
+
+.ntj-sp-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-normal);
+}
+
+.ntj-sp-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.ntj-sp-close:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* パネルボディ */
+.ntj-sp-body {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+/* フォームフィールド */
+.ntj-sp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ntj-sp-label {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ntj-sp-input-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ntj-sp-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.ntj-sp-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.ntj-sp-textarea {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 13px;
+  resize: vertical;
+  box-sizing: border-box;
+  min-height: 60px;
+  font-family: inherit;
+}
+
+.ntj-sp-textarea:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+/* カラー選択行 */
+.ntj-sp-color-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ntj-sp-color-picker {
+  width: 36px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ntj-sp-color-hex {
+  flex: 1;
+}
+
+/* ボタン行 */
+.ntj-sp-btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.ntj-sp-btn {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ntj-sp-btn:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.ntj-sp-btn-primary {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.ntj-sp-btn-primary:hover {
+  filter: brightness(1.1);
+}
+
+/* ============================================================
+   Popover — 閉じるボタン
+   ============================================================ */
+
+.ntj-popover-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ntj-popover-close {
+  font-size: 11px;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 3px;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.ntj-popover-close:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* ============================================================
+   右サイドバー（EventSidebarView）
+   ============================================================ */
+
+.ntj-sidebar {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--background-primary);
+}
+
+.ntj-sidebar-heading {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 12px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.ntj-sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.ntj-sidebar-idle {
+  color: var(--text-faint);
+  font-size: 13px;
+  line-height: 1.6;
+  margin-top: 16px;
+}
+
+/* フォームフィールド共通 */
+.ntj-sf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.ntj-sf-label {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ntj-sf-input-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ntj-sf-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.ntj-sf-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.ntj-sf-textarea {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 13px;
+  resize: vertical;
+  box-sizing: border-box;
+  min-height: 56px;
+  font-family: inherit;
+}
+
+.ntj-sf-textarea:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.ntj-sf-color-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ntj-sf-color-picker {
+  width: 36px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ntj-sf-color-hex {
+  flex: 1;
+}
+
+.ntj-sf-btn-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.ntj-sf-btn {
+  flex: 1;
+  min-width: 60px;
+  padding: 6px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.ntj-sf-btn:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.ntj-sf-btn-primary {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.ntj-sf-btn-primary:hover {
+  filter: brightness(1.1);
+}
+
+.ntj-sf-btn-danger {
+  background-color: var(--background-modifier-error);
+  color: var(--text-error);
+  border-color: var(--background-modifier-error);
+}
+
+.ntj-sf-btn-danger:hover {
+  filter: brightness(0.9);
+}
+
+/* 関連イベントリンク */
+.ntj-sf-links {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.ntj-sf-link {
+  color: var(--text-accent);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 0;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+}
+
+.ntj-sf-link:hover {
+  text-decoration-color: var(--text-accent);
+}
+
+/* サイドバーの補足メモ（暦名案内など） */
+.ntj-sidebar-note {
+  font-size: 11px;
+  color: var(--text-accent);
+  background-color: var(--background-secondary);
+  border-left: 3px solid var(--interactive-accent);
+  padding: 4px 8px;
+  margin-bottom: 10px;
+  border-radius: 0 3px 3px 0;
+}
+
+/* 関連イベント選択UI */
+.ntj-sf-link-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.ntj-sf-link-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.ntj-sf-link-id {
+  flex: 1;
+  color: var(--text-accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ntj-sf-link-missing {
+  color: var(--text-error);
+}
+
+.ntj-sf-link-warn {
+  font-size: 11px;
+  color: var(--text-error);
+  flex-shrink: 0;
+}
+
+.ntj-sf-link-del {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 3px;
+  flex-shrink: 0;
+  border-radius: 2px;
+}
+
+.ntj-sf-link-del:hover {
+  background-color: var(--background-modifier-error);
+  color: var(--text-error);
+}
+
+.ntj-sf-link-add-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.ntj-sf-link-select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 検索ボックス＋クリアボタン */
+.ntj-search-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 120px;
+  max-width: 240px;
+}
+
+.ntj-search-wrapper .ntj-search {
+  max-width: 100%;
+  padding-right: 24px;
+}
+
+.ntj-search-clear {
+  position: absolute;
+  right: 4px;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  line-height: 1;
+}
+
+.ntj-search-clear:hover {
+  color: var(--text-normal);
+  background-color: var(--background-modifier-hover);
+}
+
+/* フィルタパネル（独自ドロップダウン） */
+.ntj-filter-wrapper {
+  position: relative;
+}
+
+.ntj-filter-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 9990;
+  min-width: 160px;
+  max-height: 240px;
+  overflow-y: auto;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  padding: 6px 0;
+}
+
+.ntj-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-normal);
+}
+
+.ntj-filter-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.ntj-filter-item input[type="checkbox"] {
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ntj-filter-empty {
+  padding: 6px 12px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.ntj-filter-clear-row {
+  border-top: 1px solid var(--background-modifier-border);
+  padding: 6px 8px 2px;
+  margin-top: 4px;
+}
