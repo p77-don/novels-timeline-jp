@@ -3159,7 +3159,7 @@ var LayoutEngine = class {
    * - Gap展開/折りたたみ状態に関係なく、nodes の y 値は常に正しい描画位置を示す。
    * - 区間ごとの px/日 定数で orderDiff を復元し、最初のイベントの order を基点に加算する。
    */
-  orderFromViewportY(viewportY, scrollTop, nodes, gaps, gapCompression, calendarPrefix = "") {
+  orderFromViewportY(svgY, nodes, gaps, gapCompression, calendarPrefix = "") {
     if (nodes.length === 0) {
       return this.orderToDateString(0, calendarPrefix);
     }
@@ -3169,24 +3169,24 @@ var LayoutEngine = class {
         seen.set(node.event.timelineOrder, node.y);
       }
     }
-    const entries = Array.from(seen.entries()).map(([order, svgY]) => ({ order, vy: svgY - scrollTop })).sort((a, b) => a.vy - b.vy);
+    const entries = Array.from(seen.entries()).map(([order, y]) => ({ order, vy: y })).sort((a, b) => a.vy - b.vy);
     const first = entries[0];
     const last = entries[entries.length - 1];
-    if (viewportY <= first.vy) {
+    if (svgY <= first.vy) {
       return this.orderToDateString(Math.max(0, first.order - 1), calendarPrefix);
     }
-    if (viewportY >= last.vy) {
+    if (svgY >= last.vy) {
       return this.orderToDateString(last.order + 1, calendarPrefix);
     }
     for (let i = 0; i < entries.length - 1; i++) {
       const cur = entries[i];
       const next = entries[i + 1];
-      if (viewportY < cur.vy || viewportY > next.vy) continue;
+      if (svgY < cur.vy || svgY > next.vy) continue;
       const segH = next.vy - cur.vy;
       if (segH <= 0) {
         return this.orderToDateString(cur.order, calendarPrefix);
       }
-      const dy = viewportY - cur.vy;
+      const dy = svgY - cur.vy;
       const orderDiff = next.order - cur.order;
       const t = dy / segH;
       const rawOrder = Math.round(cur.order + t * orderDiff);
@@ -3194,9 +3194,9 @@ var LayoutEngine = class {
       return this.orderToDateString(estimatedOrder, calendarPrefix);
     }
     let nearest = entries[0];
-    let minDist = Math.abs(viewportY - entries[0].vy);
+    let minDist = Math.abs(svgY - entries[0].vy);
     for (const e of entries) {
-      const d = Math.abs(viewportY - e.vy);
+      const d = Math.abs(svgY - e.vy);
       if (d < minDist) {
         minDist = d;
         nearest = e;
@@ -5201,7 +5201,7 @@ var TimelineRenderer = class {
     this.drawRelations(ctxWithCenter, visTop, visBottom, defs);
     this.svg.oncontextmenu = (e) => {
       e.preventDefault();
-      ctx.onContextMenu(e.offsetY, this.container.scrollTop, e.clientX, e.clientY);
+      ctx.onContextMenu(e.offsetY, e.clientX, e.clientY);
     };
     this.svg.onmousemove = (e) => {
       this.tooltip.move(e.clientX, e.clientY);
@@ -6030,7 +6030,7 @@ var TimelineView = class extends import_obsidian.ItemView {
       onNodeLeave: () => {
       },
       onGapClick: (gap) => this.handleGapClick(gap),
-      onContextMenu: (viewportY, scrollTop, mx, my) => this.handleContextMenu(viewportY, scrollTop, mx, my),
+      onContextMenu: (svgY, mx, my) => this.handleContextMenu(svgY, mx, my),
       onLaneDrop: (eventId, laneShift) => this.handleLaneDrop(eventId, laneShift)
     });
     const t1 = performance.now();
@@ -6065,11 +6065,10 @@ var TimelineView = class extends import_obsidian.ItemView {
     this.gapEngine.toggleExpand(gap);
     this.scheduleRender();
   }
-  handleContextMenu(viewportY, scrollTop, mouseX, mouseY) {
+  handleContextMenu(svgY, mouseX, mouseY) {
     const settings = this.plugin.settings;
     const dateStr = this.layoutEngine.orderFromViewportY(
-      viewportY,
-      scrollTop,
+      svgY,
       this.nodes,
       this.gaps,
       settings.gapCompression,

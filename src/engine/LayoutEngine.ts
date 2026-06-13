@@ -266,8 +266,9 @@ export class LayoutEngine {
    * - 区間ごとの px/日 定数で orderDiff を復元し、最初のイベントの order を基点に加算する。
    */
   orderFromViewportY(
-    viewportY: number,
-    scrollTop: number,
+    // svgY = e.offsetY（SVGユーザー座標、スクロール込み絶対Y）
+    // node.y も同じSVGユーザー座標なので変換不要
+    svgY: number,
     nodes: LayoutNode[],
     gaps: GapSegment[],
     gapCompression: boolean,
@@ -277,7 +278,7 @@ export class LayoutEngine {
       return this.orderToDateString(0, calendarPrefix);
     }
 
-    // ① ユニークな (order, viewportY) エントリをノードから生成
+    // ① ユニークな (order, y) エントリをノードから生成
     //    同日ノードは同じ y を持つので重複排除する
     const seen = new Map<number, number>(); // order → svgY
     for (const node of nodes) {
@@ -286,17 +287,17 @@ export class LayoutEngine {
       }
     }
     const entries = Array.from(seen.entries())
-      .map(([order, svgY]) => ({ order, vy: svgY - scrollTop }))
+      .map(([order, y]) => ({ order, vy: y }))  // node.y はすでにSVGユーザー座標
       .sort((a, b) => a.vy - b.vy);
 
     // ② 境界チェック
     const first = entries[0];
     const last  = entries[entries.length - 1];
 
-    if (viewportY <= first.vy) {
+    if (svgY <= first.vy) {
       return this.orderToDateString(Math.max(0, first.order - 1), calendarPrefix);
     }
-    if (viewportY >= last.vy) {
+    if (svgY >= last.vy) {
       return this.orderToDateString(last.order + 1, calendarPrefix);
     }
 
@@ -304,14 +305,14 @@ export class LayoutEngine {
     for (let i = 0; i < entries.length - 1; i++) {
       const cur  = entries[i];
       const next = entries[i + 1];
-      if (viewportY < cur.vy || viewportY > next.vy) continue;
+      if (svgY < cur.vy || svgY > next.vy) continue;
 
       const segH = next.vy - cur.vy;
       if (segH <= 0) {
         return this.orderToDateString(cur.order, calendarPrefix);
       }
 
-      const dy        = viewportY - cur.vy;
+      const dy        = svgY - cur.vy;
       const orderDiff = next.order - cur.order;
 
       // 【重要】t = dy / segH（実際のセグメント高さで割る）を使う。
@@ -328,9 +329,9 @@ export class LayoutEngine {
 
     // フォールバック: 最近傍エントリのorderを返す（絶対に year=1 にしない）
     let nearest = entries[0];
-    let minDist = Math.abs(viewportY - entries[0].vy);
+    let minDist = Math.abs(svgY - entries[0].vy);
     for (const e of entries) {
-      const d = Math.abs(viewportY - e.vy);
+      const d = Math.abs(svgY - e.vy);
       if (d < minDist) { minDist = d; nearest = e; }
     }
     return this.orderToDateString(nearest.order, calendarPrefix);

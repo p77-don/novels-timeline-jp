@@ -456,7 +456,7 @@ export class TimelineView extends ItemView {
       onNodeHover:   () => { /* Tooltip は Renderer 内で処理済み */ },
       onNodeLeave:   () => { /* Tooltip hide は Renderer 内で処理済み */ },
       onGapClick:    (gap) => this.handleGapClick(gap),
-      onContextMenu: (viewportY, scrollTop, mx, my) => this.handleContextMenu(viewportY, scrollTop, mx, my),
+      onContextMenu: (svgY, mx, my) => this.handleContextMenu(svgY, mx, my),
       onLaneDrop:    (eventId, laneShift) => this.handleLaneDrop(eventId, laneShift),
     });
 
@@ -505,13 +505,13 @@ export class TimelineView extends ItemView {
     this.scheduleRender();
   }
 
-  private handleContextMenu(viewportY: number, scrollTop: number, mouseX: number, mouseY: number): void {
+  private handleContextMenu(svgY: number, mouseX: number, mouseY: number): void {
     const settings  = this.plugin.settings;
 
-    // nodes（実際の描画Y座標を持つ）を直接使って日付を逆算する。
-    // yToDateString（allEventsベース再計算）は廃止。
+    // e.offsetY（SVGユーザー座標）をそのまま渡す。
+    // node.y も同じSVGユーザー座標なので変換不要。
     const dateStr = this.layoutEngine.orderFromViewportY(
-      viewportY, scrollTop, this.nodes, this.gaps, settings.gapCompression, ""
+      svgY, this.nodes, this.gaps, settings.gapCompression, ""
     );
 
     const menu = new Menu();
