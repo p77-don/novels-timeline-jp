@@ -26,6 +26,19 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
     containerEl.createEl("h2", { text: "General" });
 
     new Setting(containerEl)
+      .setName("新規イベントの保存先フォルダ")
+      .setDesc("右クリックで作成するイベントノートの保存先（空の場合は Vault ルート）")
+      .addText((text) =>
+        text
+          .setPlaceholder("例: events / stories/chapter1")
+          .setValue(this.plugin.settings.newEventFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.newEventFolder = value.trim().replace(/\/$/, "");
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
       .setName("Excluded Folders")
       .setDesc("タイムライン探索から除外するフォルダ（カンマ区切り）")
       .addText((text) =>
@@ -62,157 +75,19 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
-      .setName("Zoom Default")
-      .setDesc("初期ズーム率（50〜300%）")
-      .addSlider((slider) =>
-        slider
-          .setLimits(50, 300, 10)
-          .setValue(this.plugin.settings.zoomDefault)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.zoomDefault = value;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Theme Mode")
-      .setDesc("タイムライン表示テーマ")
-      .addDropdown((dd) =>
-        dd
-          .addOption("auto",  "Auto")
-          .addOption("light", "Light")
-          .addOption("dark",  "Dark")
-          .setValue(this.plugin.settings.themeMode)
-          .onChange(async (value) => {
-            this.plugin.settings.themeMode = value as "auto" | "light" | "dark";
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      );
-
-    // ========================================================
-    // Timeline
-    // ========================================================
-    containerEl.createEl("h2", { text: "Timeline" });
-
-    new Setting(containerEl)
-      .setName("Gap Compression")
-      .setDesc("長期間の空白を圧縮表示する")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.gapCompression)
-          .onChange(async (value) => {
-            this.plugin.settings.gapCompression = value;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Gap Threshold")
-      .setDesc("Gap生成条件（日数相当値）")
-      .addText((text) =>
-        text
-          .setValue(String(this.plugin.settings.gapThreshold))
-          .onChange(async (value) => {
-            const n = parseInt(value, 10);
-            if (Number.isFinite(n) && n > 0) {
-              this.plugin.settings.gapThreshold = n;
-              await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-            }
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Auto Expand Gap")
-      .setDesc("起動時にGapを展開した状態にする")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.autoExpandGap)
-          .onChange(async (value) => {
-            this.plugin.settings.autoExpandGap = value;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      );
-
-    // ========================================================
-    // Calendar（C. 暦設定）
-    // ========================================================
-    containerEl.createEl("h2", { text: "Calendar（暦設定）" });
-    containerEl.createEl("p", {
-      text: "物語世界の暦を定義します。月数・月名・各月の日数を設定してください。",
-      cls: "setting-item-description",
-    });
-
-    // 暦名
-    new Setting(containerEl)
-      .setName("暦の名前")
-      .setDesc("表示用（任意）")
-      .addText((text) =>
-        text
-          .setValue(this.plugin.settings.calendar.name)
-          .onChange(async (value) => {
-            this.plugin.settings.calendar.name = value;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      );
-
-    // 月テーブル
-    this.buildCalendarTable(containerEl);
-
-    // 月を追加ボタン
-    new Setting(containerEl)
-      .setName("月を追加")
-      .setDesc("暦に月を追加します")
-      .addButton((btn) =>
-        btn.setButtonText("＋ 月を追加").onClick(async () => {
-          const months = this.plugin.settings.calendar.months;
-          const nextMonth = months.length + 1;
-          months.push({ month: nextMonth, name: "", days: 30 });
-          await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          this.display(); // 再描画
-        })
-      );
-
-    // デフォルト暦に戻す
-    new Setting(containerEl)
-      .setName("デフォルト暦に戻す")
-      .setDesc("西暦互換の12か月設定に戻します")
-      .addButton((btn) =>
-        btn
-          .setButtonText("リセット")
-          .setWarning()
-          .onClick(async () => {
-            this.plugin.settings.calendar = JSON.parse(JSON.stringify(DEFAULT_CALENDAR));
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-            this.display();
-          })
-      );
-
     // ========================================================
     // Relation
     // ========================================================
     containerEl.createEl("h2", { text: "Relation" });
 
     new Setting(containerEl)
-      .setName("Relation Display Mode")
-      .setDesc("関係線の表示方法")
-      .addDropdown((dd) =>
-        dd
-          .addOption("selected", "Selected Event")
-          .addOption("always",   "Always Visible")
-          .addOption("hidden",   "Hidden")
-          .setValue(this.plugin.settings.relationDisplayMode)
+      .setName("Relation Color")
+      .setDesc("関係線の色")
+      .addColorPicker((picker) =>
+        picker
+          .setValue(this.plugin.settings.relationColor)
           .onChange(async (value) => {
-            this.plugin.settings.relationDisplayMode = value as "selected" | "always" | "hidden";
+            this.plugin.settings.relationColor = value;
             await this.plugin.saveSettings();
             this.plugin.notifySettingsChanged();
           })
@@ -294,9 +169,100 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
       );
 
     // ========================================================
-    // Performance
+    // Timeline
     // ========================================================
-    containerEl.createEl("h2", { text: "Performance" });
+    containerEl.createEl("h2", { text: "Timeline" });
+
+    new Setting(containerEl)
+      .setName("Gap Compression")
+      .setDesc("長期間の空白を圧縮表示する")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.gapCompression)
+          .onChange(async (value) => {
+            this.plugin.settings.gapCompression = value;
+            await this.plugin.saveSettings();
+            this.plugin.notifySettingsChanged();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Gap Threshold")
+      .setDesc("Gap生成条件（日数相当値）")
+      .addText((text) =>
+        text
+          .setValue(String(this.plugin.settings.gapThreshold))
+          .onChange(async (value) => {
+            const n = parseInt(value, 10);
+            if (Number.isFinite(n) && n > 0) {
+              this.plugin.settings.gapThreshold = n;
+              await this.plugin.saveSettings();
+              this.plugin.notifySettingsChanged();
+            }
+          })
+      );
+
+    // ========================================================
+    // Calendar（C. 暦設定）
+    // ========================================================
+    containerEl.createEl("h2", { text: "Calendar（暦設定）" });
+    containerEl.createEl("p", {
+      text: "物語世界の暦を定義します。月数・月名・各月の日数を設定してください。",
+      cls: "setting-item-description",
+    });
+
+    // 暦名
+    new Setting(containerEl)
+      .setName("暦の名前")
+      .setDesc("表示用（任意）")
+      .addText((text) =>
+        text
+          .setValue(this.plugin.settings.calendar.name)
+          .onChange(async (value) => {
+            this.plugin.settings.calendar.name = value;
+            await this.plugin.saveSettings();
+            this.plugin.notifySettingsChanged();
+          })
+      );
+
+    // 月テーブル
+    this.buildCalendarTable(containerEl);
+
+    // 月を追加ボタン
+    new Setting(containerEl)
+      .setName("月を追加")
+      .setDesc("暦に月を追加します")
+      .addButton((btn) =>
+        btn.setButtonText("＋ 月を追加").onClick(async () => {
+          const months = this.plugin.settings.calendar.months;
+          const nextMonth = months.length + 1;
+          months.push({ month: nextMonth, name: "", days: 30 });
+          await this.plugin.saveSettings();
+          this.plugin.notifySettingsChanged();
+          this.display(); // 再描画
+        })
+      );
+
+    // デフォルト暦に戻す
+    new Setting(containerEl)
+      .setName("デフォルト暦に戻す")
+      .setDesc("暦名を「西暦」、月名を未設定にリセットします")
+      .addButton((btn) =>
+        btn
+          .setButtonText("リセット")
+          .setWarning()
+          .onClick(async () => {
+            this.plugin.settings.calendar = JSON.parse(JSON.stringify(DEFAULT_CALENDAR));
+            await this.plugin.saveSettings();
+            this.plugin.notifySettingsChanged();
+            this.display();
+          })
+      );
+
+    // ========================================================
+    // Advanced
+    // ========================================================
+    containerEl.createEl("h2", { text: "Advanced" });
 
     new Setting(containerEl)
       .setName("Virtual Rendering")
@@ -322,39 +288,8 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
             if (Number.isFinite(n) && n >= 0) {
               this.plugin.settings.renderBuffer = n;
               await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
+              this.plugin.notifySettingsChanged();
             }
-          })
-      );
-
-    // ========================================================
-    // Advanced
-    // ========================================================
-    containerEl.createEl("h2", { text: "Advanced" });
-
-    new Setting(containerEl)
-      .setName("新規イベントの保存先フォルダ")
-      .setDesc("右クリックで作成するイベントノートの保存先（空の場合は Vault ルート）")
-      .addText((text) =>
-        text
-          .setPlaceholder("例: events / stories/chapter1")
-          .setValue(this.plugin.settings.newEventFolder)
-          .onChange(async (value) => {
-            this.plugin.settings.newEventFolder = value.trim().replace(/\/$/, "");
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Debug Mode")
-      .setDesc("デバッグ情報をコンソールに出力する")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.debugMode)
-          .onChange(async (value) => {
-            this.plugin.settings.debugMode = value;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
           })
       );
 
@@ -371,22 +306,6 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
             new Notice("タイムラインビューが開いていません");
           }
         })
-      );
-
-    new Setting(containerEl)
-      .setName("Clear Cache")
-      .setDesc("キャッシュファイルを削除する")
-      .addButton((btn) =>
-        btn
-          .setButtonText("削除")
-          .setWarning()
-          .onClick(async () => {
-            const view = this.plugin.getTimelineView();
-            if (view) {
-              await view.rebuildAll();
-              new Notice("キャッシュを削除しました");
-            }
-          })
       );
   }
 
@@ -435,7 +354,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
     nameInput.addEventListener("change", async () => {
       months[index].name = nameInput.value;
       await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
+      this.plugin.notifySettingsChanged();
     });
 
     // 日数
@@ -450,7 +369,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
       if (Number.isFinite(n) && n >= 1) {
         months[index].days = n;
         await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
+        this.plugin.notifySettingsChanged();
       }
     });
 
@@ -462,7 +381,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
       // 月番号を振り直す
       months.forEach((m, i) => { m.month = i + 1; });
       await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
+      this.plugin.notifySettingsChanged();
       this.display();
     });
   }

@@ -22,7 +22,9 @@ const BASE_RADIUS: Record<string, number> = {
 const TOP_MARGIN            = 110;  // 上部マージン(px) — ルーラー分の余白
 const MIN_Y_GAP             = 40;   // 隣接イベント間の最小Y間隔(px)
 const COMPRESSED_GAP_HEIGHT = 40;   // Gap圧縮時の固定高さ(px)
-const Y_SCALE               = 4.0;  // timelineOrder差 → px (1日=4px)
+const Y_SCALE               = 4.0;  // 通常描画時の timelineOrder差 → px (1日=4px)
+const EXPANDED_PX_PER_DAY   = 20;   // Gap展開時の1日あたり高さ(px)
+const EXPANDED_MIN_HEIGHT   = 120;  // Gap展開時の最小高さ(px) — 圧縮時より必ず大きくする
 
 export class LayoutEngine {
   private dateParser: DateParser;
@@ -111,7 +113,7 @@ export class LayoutEngine {
         );
         if (matchingGap) {
           currentY += matchingGap.expanded
-            ? Math.max(MIN_Y_GAP, orderDiff * Y_SCALE)
+            ? Math.max(EXPANDED_MIN_HEIGHT, orderDiff * EXPANDED_PX_PER_DAY)
             : COMPRESSED_GAP_HEIGHT;
         } else {
           currentY += Math.max(MIN_Y_GAP, orderDiff * Y_SCALE);

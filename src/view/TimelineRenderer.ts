@@ -135,7 +135,17 @@ export class TimelineRenderer {
 
     this.svg.oncontextmenu = (e: MouseEvent) => {
       e.preventDefault();
-      ctx.onContextMenu(this.clientYToSvgY(e.clientY), e.clientX, e.clientY);
+      // SVGユーザー座標への正しい変換:
+      //   offsetY = SVG要素のCSSレイアウト上の上端からのY（0〜rect.height）
+      //   scaleY  = SVGユーザー高さ(height属性値) / CSSレイアウト高さ(rect.height)
+      //             SVGがコンテナにクリップされている場合は totalHeight/containerHeight
+      //             SVGが全高表示の場合は 1.0
+      //   SVGユーザーY = scrollTop + offsetY * scaleY
+      const rect   = this.svg.getBoundingClientRect();
+      const totalH = parseFloat(this.svg.getAttribute("height") ?? "1");
+      const scaleY = totalH / (rect.height || 1);
+      const svgY   = this.container.scrollTop + e.offsetY * scaleY;
+      ctx.onContextMenu(svgY, e.clientX, e.clientY);
     };
     this.svg.onmousemove = (e: MouseEvent) => {
       this.tooltip.move(e.clientX, e.clientY);
@@ -600,7 +610,7 @@ export class TimelineRenderer {
       `${toNode.x - cpOffset} ${toNode.y - dy * 0.3}, ${toNode.x} ${toNode.y}`
     );
     path.setAttribute("fill",           "none");
-    path.setAttribute("stroke",         COLOR.relation);
+    path.setAttribute("stroke",         settings.relationColor);
     path.setAttribute("stroke-width",   String(settings.relationWidth));
     path.setAttribute("stroke-opacity", String(settings.relationOpacity));
 
@@ -608,7 +618,8 @@ export class TimelineRenderer {
     else if (settings.relationStyle === "dotted") path.setAttribute("stroke-dasharray", "2 4");
 
     if (settings.relationArrowStyle !== "none") {
-      path.setAttribute("marker-end", `url(#ntj-arrow-${settings.relationArrowStyle})`);
+      const colorKey = settings.relationColor.replace(/[^a-zA-Z0-9]/g, "");
+      path.setAttribute("marker-end", `url(#ntj-arrow-${settings.relationArrowStyle}-${colorKey})`);
     }
 
     this.svg.appendChild(path);
@@ -616,7 +627,8 @@ export class TimelineRenderer {
 
   private addArrowMarker(defs: SVGDefsElement, settings: NovelsTimelineSettings): void {
     const style    = settings.relationArrowStyle;
-    const markerId = `ntj-arrow-${style}`;
+    const colorKey = settings.relationColor.replace(/[^a-zA-Z0-9]/g, "");
+    const markerId = `ntj-arrow-${style}-${colorKey}`;
     if (defs.querySelector(`#${markerId}`)) return;
 
     const marker = document.createElementNS(SVG_NS, "marker");
@@ -631,12 +643,12 @@ export class TimelineRenderer {
     const shape = document.createElementNS(SVG_NS, "path");
     if (style === "triangle") {
       shape.setAttribute("d",      "M0 0L10 5L0 10Z");
-      shape.setAttribute("fill",   COLOR.relation);
+      shape.setAttribute("fill",   settings.relationColor);
       shape.setAttribute("stroke", "none");
     } else {
       shape.setAttribute("d",              "M2 1L8 5L2 9");
       shape.setAttribute("fill",           "none");
-      shape.setAttribute("stroke",         COLOR.relation);
+      shape.setAttribute("stroke",         settings.relationColor);
       shape.setAttribute("stroke-width",   "1.5");
       shape.setAttribute("stroke-linecap", "round");
     }
@@ -696,10 +708,21 @@ export class TimelineRenderer {
   // ----------------------------------------------------------
 
   clientYToSvgY(clientY: number): number {
-    const rect       = this.svg.getBoundingClientRect();
-    const totalH     = parseFloat(this.svg.getAttribute("height") ?? "1");
-    const scaleY     = totalH / (rect.height || 1);
-    return (clientY - rect.top) * scaleY;
+    // SVG標準の座標変換を使用する。
+    // getBoundingClientRect は overflow:scroll コンテナ内では
+    // rect.height = コンテナの viewport 高さ（SVG全体高さではない）を返すため、
+    // scaleY の計算が狂う。getScreenCTM() はSVGの実際の変換行列を返すので正確。
+    const ctm = this.svg.getScreenCTM();
+    if (ctm) {
+      // ctm.d = Y方向のスケール（SVGユーザー単位/cssピクセル）
+      // (clientY - ctm.f) / ctm.d でSVGユーザー座標のY値が得られる
+      return (clientY - ctm.f) / ctm.d;
+    }
+    // フォールバック（ctm が取得できない場合）
+    const rect = this.svg.getBoundingClientRect();
+    const totalH = parseFloat(this.svg.getAttribute("height") ?? "1");
+    return (clientY - rect.top + this.container.scrollTop)
+         * (totalH / (rect.height || 1));
   }
 
   private clientDxToSvgDx(clientDx: number): number {

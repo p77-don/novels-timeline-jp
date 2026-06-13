@@ -30,32 +30,30 @@ var import_obsidian4 = require("obsidian");
 
 // src/settings/PluginSettings.ts
 var DEFAULT_CALENDAR = {
-  name: "\u6A19\u6E96\u66A6",
+  name: "\u897F\u66A6",
   months: [
-    { month: 1, name: "\u4E00\u6708", days: 31 },
-    { month: 2, name: "\u4E8C\u6708", days: 28 },
-    { month: 3, name: "\u4E09\u6708", days: 31 },
-    { month: 4, name: "\u56DB\u6708", days: 30 },
-    { month: 5, name: "\u4E94\u6708", days: 31 },
-    { month: 6, name: "\u516D\u6708", days: 30 },
-    { month: 7, name: "\u4E03\u6708", days: 31 },
-    { month: 8, name: "\u516B\u6708", days: 31 },
-    { month: 9, name: "\u4E5D\u6708", days: 30 },
-    { month: 10, name: "\u5341\u6708", days: 31 },
-    { month: 11, name: "\u5341\u4E00\u6708", days: 30 },
-    { month: 12, name: "\u5341\u4E8C\u6708", days: 31 }
+    { month: 1, name: "", days: 31 },
+    { month: 2, name: "", days: 28 },
+    { month: 3, name: "", days: 31 },
+    { month: 4, name: "", days: 30 },
+    { month: 5, name: "", days: 31 },
+    { month: 6, name: "", days: 30 },
+    { month: 7, name: "", days: 31 },
+    { month: 8, name: "", days: 31 },
+    { month: 9, name: "", days: 30 },
+    { month: 10, name: "", days: 31 },
+    { month: 11, name: "", days: 30 },
+    { month: 12, name: "", days: 31 }
   ]
 };
 var DEFAULT_SETTINGS = {
+  newEventFolder: "",
   excludedFolders: [],
   nodeScale: 100,
-  zoomDefault: 100,
-  themeMode: "auto",
   gapCompression: true,
   gapThreshold: 30,
-  autoExpandGap: false,
   calendar: DEFAULT_CALENDAR,
-  relationDisplayMode: "selected",
+  relationColor: "#808080",
   relationStyle: "solid",
   relationWidth: 2,
   relationArrowStyle: "arrow",
@@ -63,8 +61,8 @@ var DEFAULT_SETTINGS = {
   relationCurveStrength: 50,
   virtualRendering: true,
   renderBuffer: 1500,
-  debugMode: false,
-  newEventFolder: ""
+  relationDisplayMode: "selected",
+  debugMode: false
 };
 function calcYearDays(calendar) {
   return calendar.months.reduce((sum, m) => sum + m.days, 0);
@@ -2994,6 +2992,8 @@ var TOP_MARGIN = 110;
 var MIN_Y_GAP = 40;
 var COMPRESSED_GAP_HEIGHT = 40;
 var Y_SCALE = 4;
+var EXPANDED_PX_PER_DAY = 20;
+var EXPANDED_MIN_HEIGHT = 120;
 var LayoutEngine = class {
   constructor(calendar) {
     this.dateParser = new DateParser(calendar);
@@ -3048,7 +3048,7 @@ var LayoutEngine = class {
           (g) => g.fromOrder === prev.order && g.toOrder === cur.order
         );
         if (matchingGap) {
-          currentY += matchingGap.expanded ? Math.max(MIN_Y_GAP, orderDiff * Y_SCALE) : COMPRESSED_GAP_HEIGHT;
+          currentY += matchingGap.expanded ? Math.max(EXPANDED_MIN_HEIGHT, orderDiff * EXPANDED_PX_PER_DAY) : COMPRESSED_GAP_HEIGHT;
         } else {
           currentY += Math.max(MIN_Y_GAP, orderDiff * Y_SCALE);
         }
@@ -3256,7 +3256,8 @@ var GapEngine = class {
       const before = sortedEvents[i];
       const after = sortedEvents[i + 1];
       const diff = after.timelineOrder - before.timelineOrder;
-      if (diff < threshold) continue;
+      const gapDays = Math.max(0, diff - 1);
+      if (gapDays < threshold) continue;
       const yBefore = (_a = yPositions.get(before.id)) != null ? _a : 0;
       const yAfter = (_b = yPositions.get(after.id)) != null ? _b : 0;
       gaps.push(this.buildGap({ before, after, yBefore, yAfter }));
@@ -3325,11 +3326,12 @@ var GapEngine = class {
     const { before, after, yBefore, yAfter } = input;
     const diff = after.timelineOrder - before.timelineOrder;
     const key = this.gapKeyFromOrders(before.timelineOrder, after.timelineOrder);
+    const gapDays = Math.max(0, diff - 1);
     return {
       fromOrder: before.timelineOrder,
       toOrder: after.timelineOrder,
       y: (yBefore + yAfter) / 2,
-      label: this.formatDiff(diff),
+      label: this.formatDiff(gapDays),
       expanded: this.expandedKeys.has(key)
     };
   }
@@ -5167,8 +5169,13 @@ var TimelineRenderer = class {
     this.drawNodes(ctxWithCenter, visTop, visBottom);
     this.drawRelations(ctxWithCenter, visTop, visBottom, defs);
     this.svg.oncontextmenu = (e) => {
+      var _a;
       e.preventDefault();
-      ctx.onContextMenu(this.clientYToSvgY(e.clientY), e.clientX, e.clientY);
+      const rect = this.svg.getBoundingClientRect();
+      const totalH = parseFloat((_a = this.svg.getAttribute("height")) != null ? _a : "1");
+      const scaleY = totalH / (rect.height || 1);
+      const svgY = this.container.scrollTop + e.offsetY * scaleY;
+      ctx.onContextMenu(svgY, e.clientX, e.clientY);
     };
     this.svg.onmousemove = (e) => {
       this.tooltip.move(e.clientX, e.clientY);
@@ -5547,19 +5554,21 @@ var TimelineRenderer = class {
       `M ${fromNode.x} ${fromNode.y} C ${fromNode.x + cpOffset} ${fromNode.y + dy * 0.3}, ${toNode.x - cpOffset} ${toNode.y - dy * 0.3}, ${toNode.x} ${toNode.y}`
     );
     path.setAttribute("fill", "none");
-    path.setAttribute("stroke", COLOR.relation);
+    path.setAttribute("stroke", settings.relationColor);
     path.setAttribute("stroke-width", String(settings.relationWidth));
     path.setAttribute("stroke-opacity", String(settings.relationOpacity));
     if (settings.relationStyle === "dashed") path.setAttribute("stroke-dasharray", "6 4");
     else if (settings.relationStyle === "dotted") path.setAttribute("stroke-dasharray", "2 4");
     if (settings.relationArrowStyle !== "none") {
-      path.setAttribute("marker-end", `url(#ntj-arrow-${settings.relationArrowStyle})`);
+      const colorKey = settings.relationColor.replace(/[^a-zA-Z0-9]/g, "");
+      path.setAttribute("marker-end", `url(#ntj-arrow-${settings.relationArrowStyle}-${colorKey})`);
     }
     this.svg.appendChild(path);
   }
   addArrowMarker(defs, settings) {
     const style = settings.relationArrowStyle;
-    const markerId = `ntj-arrow-${style}`;
+    const colorKey = settings.relationColor.replace(/[^a-zA-Z0-9]/g, "");
+    const markerId = `ntj-arrow-${style}-${colorKey}`;
     if (defs.querySelector(`#${markerId}`)) return;
     const marker = document.createElementNS(SVG_NS2, "marker");
     marker.setAttribute("id", markerId);
@@ -5572,12 +5581,12 @@ var TimelineRenderer = class {
     const shape = document.createElementNS(SVG_NS2, "path");
     if (style === "triangle") {
       shape.setAttribute("d", "M0 0L10 5L0 10Z");
-      shape.setAttribute("fill", COLOR.relation);
+      shape.setAttribute("fill", settings.relationColor);
       shape.setAttribute("stroke", "none");
     } else {
       shape.setAttribute("d", "M2 1L8 5L2 9");
       shape.setAttribute("fill", "none");
-      shape.setAttribute("stroke", COLOR.relation);
+      shape.setAttribute("stroke", settings.relationColor);
       shape.setAttribute("stroke-width", "1.5");
       shape.setAttribute("stroke-linecap", "round");
     }
@@ -5631,10 +5640,13 @@ var TimelineRenderer = class {
   // ----------------------------------------------------------
   clientYToSvgY(clientY) {
     var _a;
+    const ctm = this.svg.getScreenCTM();
+    if (ctm) {
+      return (clientY - ctm.f) / ctm.d;
+    }
     const rect = this.svg.getBoundingClientRect();
     const totalH = parseFloat((_a = this.svg.getAttribute("height")) != null ? _a : "1");
-    const scaleY = totalH / (rect.height || 1);
-    return (clientY - rect.top) * scaleY;
+    return (clientY - rect.top + this.container.scrollTop) * (totalH / (rect.height || 1));
   }
   clientDxToSvgDx(clientDx) {
     var _a;
@@ -6391,7 +6403,7 @@ var EventSidebarView = class extends import_obsidian2.ItemView {
     select.id = `${prefix}-link-select`;
     const selfId = this.mode.type === "view-edit" ? this.mode.event.id : null;
     const allEvents = this.plugin.app.vault.getMarkdownFiles().map((f) => f.basename).filter((name) => /^\d{4}-/.test(name) && name !== selfId).sort();
-    const placeholder = select.createEl("option", { text: "\u2500\u2500 \u30A4\u30D9\u30F3\u30C8\u3092\u9078\u629E \u2500\u2500" });
+    const placeholder = select.createEl("option", { text: "\u25BC\u30A4\u30D9\u30F3\u30C8\u3092\u9078\u629E" });
     placeholder.value = "";
     placeholder.disabled = true;
     placeholder.selected = true;
@@ -6737,6 +6749,12 @@ var NovelsTimelineSettingTab = class extends import_obsidian3.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "General" });
+    new import_obsidian3.Setting(containerEl).setName("\u65B0\u898F\u30A4\u30D9\u30F3\u30C8\u306E\u4FDD\u5B58\u5148\u30D5\u30A9\u30EB\u30C0").setDesc("\u53F3\u30AF\u30EA\u30C3\u30AF\u3067\u4F5C\u6210\u3059\u308B\u30A4\u30D9\u30F3\u30C8\u30CE\u30FC\u30C8\u306E\u4FDD\u5B58\u5148\uFF08\u7A7A\u306E\u5834\u5408\u306F Vault \u30EB\u30FC\u30C8\uFF09").addText(
+      (text) => text.setPlaceholder("\u4F8B: events / stories/chapter1").setValue(this.plugin.settings.newEventFolder).onChange(async (value) => {
+        this.plugin.settings.newEventFolder = value.trim().replace(/\/$/, "");
+        await this.plugin.saveSettings();
+      })
+    );
     new import_obsidian3.Setting(containerEl).setName("Excluded Folders").setDesc("\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u63A2\u7D22\u304B\u3089\u9664\u5916\u3059\u308B\u30D5\u30A9\u30EB\u30C0\uFF08\u30AB\u30F3\u30DE\u533A\u5207\u308A\uFF09").addText(
       (text) => text.setPlaceholder("Templates, Archive, Trash").setValue(this.plugin.settings.excludedFolders.join(", ")).onChange(async (value) => {
         this.plugin.settings.excludedFolders = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
@@ -6752,80 +6770,10 @@ var NovelsTimelineSettingTab = class extends import_obsidian3.PluginSettingTab {
         this.plugin.notifySettingsChanged();
       })
     );
-    new import_obsidian3.Setting(containerEl).setName("Zoom Default").setDesc("\u521D\u671F\u30BA\u30FC\u30E0\u7387\uFF0850\u301C300%\uFF09").addSlider(
-      (slider) => slider.setLimits(50, 300, 10).setValue(this.plugin.settings.zoomDefault).setDynamicTooltip().onChange(async (value) => {
-        this.plugin.settings.zoomDefault = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    );
-    new import_obsidian3.Setting(containerEl).setName("Theme Mode").setDesc("\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u8868\u793A\u30C6\u30FC\u30DE").addDropdown(
-      (dd) => dd.addOption("auto", "Auto").addOption("light", "Light").addOption("dark", "Dark").setValue(this.plugin.settings.themeMode).onChange(async (value) => {
-        this.plugin.settings.themeMode = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    );
-    containerEl.createEl("h2", { text: "Timeline" });
-    new import_obsidian3.Setting(containerEl).setName("Gap Compression").setDesc("\u9577\u671F\u9593\u306E\u7A7A\u767D\u3092\u5727\u7E2E\u8868\u793A\u3059\u308B").addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.gapCompression).onChange(async (value) => {
-        this.plugin.settings.gapCompression = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    );
-    new import_obsidian3.Setting(containerEl).setName("Gap Threshold").setDesc("Gap\u751F\u6210\u6761\u4EF6\uFF08\u65E5\u6570\u76F8\u5F53\u5024\uFF09").addText(
-      (text) => text.setValue(String(this.plugin.settings.gapThreshold)).onChange(async (value) => {
-        const n = parseInt(value, 10);
-        if (Number.isFinite(n) && n > 0) {
-          this.plugin.settings.gapThreshold = n;
-          await this.plugin.saveSettings();
-          this.plugin.notifySettingsChanged();
-        }
-      })
-    );
-    new import_obsidian3.Setting(containerEl).setName("Auto Expand Gap").setDesc("\u8D77\u52D5\u6642\u306BGap\u3092\u5C55\u958B\u3057\u305F\u72B6\u614B\u306B\u3059\u308B").addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.autoExpandGap).onChange(async (value) => {
-        this.plugin.settings.autoExpandGap = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    );
-    containerEl.createEl("h2", { text: "Calendar\uFF08\u66A6\u8A2D\u5B9A\uFF09" });
-    containerEl.createEl("p", {
-      text: "\u7269\u8A9E\u4E16\u754C\u306E\u66A6\u3092\u5B9A\u7FA9\u3057\u307E\u3059\u3002\u6708\u6570\u30FB\u6708\u540D\u30FB\u5404\u6708\u306E\u65E5\u6570\u3092\u8A2D\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
-      cls: "setting-item-description"
-    });
-    new import_obsidian3.Setting(containerEl).setName("\u66A6\u306E\u540D\u524D").setDesc("\u8868\u793A\u7528\uFF08\u4EFB\u610F\uFF09").addText(
-      (text) => text.setValue(this.plugin.settings.calendar.name).onChange(async (value) => {
-        this.plugin.settings.calendar.name = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    );
-    this.buildCalendarTable(containerEl);
-    new import_obsidian3.Setting(containerEl).setName("\u6708\u3092\u8FFD\u52A0").setDesc("\u66A6\u306B\u6708\u3092\u8FFD\u52A0\u3057\u307E\u3059").addButton(
-      (btn) => btn.setButtonText("\uFF0B \u6708\u3092\u8FFD\u52A0").onClick(async () => {
-        const months = this.plugin.settings.calendar.months;
-        const nextMonth = months.length + 1;
-        months.push({ month: nextMonth, name: "", days: 30 });
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-        this.display();
-      })
-    );
-    new import_obsidian3.Setting(containerEl).setName("\u30C7\u30D5\u30A9\u30EB\u30C8\u66A6\u306B\u623B\u3059").setDesc("\u897F\u66A6\u4E92\u63DB\u306E12\u304B\u6708\u8A2D\u5B9A\u306B\u623B\u3057\u307E\u3059").addButton(
-      (btn) => btn.setButtonText("\u30EA\u30BB\u30C3\u30C8").setWarning().onClick(async () => {
-        this.plugin.settings.calendar = JSON.parse(JSON.stringify(DEFAULT_CALENDAR));
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-        this.display();
-      })
-    );
     containerEl.createEl("h2", { text: "Relation" });
-    new import_obsidian3.Setting(containerEl).setName("Relation Display Mode").setDesc("\u95A2\u4FC2\u7DDA\u306E\u8868\u793A\u65B9\u6CD5").addDropdown(
-      (dd) => dd.addOption("selected", "Selected Event").addOption("always", "Always Visible").addOption("hidden", "Hidden").setValue(this.plugin.settings.relationDisplayMode).onChange(async (value) => {
-        this.plugin.settings.relationDisplayMode = value;
+    new import_obsidian3.Setting(containerEl).setName("Relation Color").setDesc("\u95A2\u4FC2\u7DDA\u306E\u8272").addColorPicker(
+      (picker) => picker.setValue(this.plugin.settings.relationColor).onChange(async (value) => {
+        this.plugin.settings.relationColor = value;
         await this.plugin.saveSettings();
         this.plugin.notifySettingsChanged();
       })
@@ -6865,7 +6813,56 @@ var NovelsTimelineSettingTab = class extends import_obsidian3.PluginSettingTab {
         this.plugin.notifySettingsChanged();
       })
     );
-    containerEl.createEl("h2", { text: "Performance" });
+    containerEl.createEl("h2", { text: "Timeline" });
+    new import_obsidian3.Setting(containerEl).setName("Gap Compression").setDesc("\u9577\u671F\u9593\u306E\u7A7A\u767D\u3092\u5727\u7E2E\u8868\u793A\u3059\u308B").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.gapCompression).onChange(async (value) => {
+        this.plugin.settings.gapCompression = value;
+        await this.plugin.saveSettings();
+        this.plugin.notifySettingsChanged();
+      })
+    );
+    new import_obsidian3.Setting(containerEl).setName("Gap Threshold").setDesc("Gap\u751F\u6210\u6761\u4EF6\uFF08\u65E5\u6570\u76F8\u5F53\u5024\uFF09").addText(
+      (text) => text.setValue(String(this.plugin.settings.gapThreshold)).onChange(async (value) => {
+        const n = parseInt(value, 10);
+        if (Number.isFinite(n) && n > 0) {
+          this.plugin.settings.gapThreshold = n;
+          await this.plugin.saveSettings();
+          this.plugin.notifySettingsChanged();
+        }
+      })
+    );
+    containerEl.createEl("h2", { text: "Calendar\uFF08\u66A6\u8A2D\u5B9A\uFF09" });
+    containerEl.createEl("p", {
+      text: "\u7269\u8A9E\u4E16\u754C\u306E\u66A6\u3092\u5B9A\u7FA9\u3057\u307E\u3059\u3002\u6708\u6570\u30FB\u6708\u540D\u30FB\u5404\u6708\u306E\u65E5\u6570\u3092\u8A2D\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      cls: "setting-item-description"
+    });
+    new import_obsidian3.Setting(containerEl).setName("\u66A6\u306E\u540D\u524D").setDesc("\u8868\u793A\u7528\uFF08\u4EFB\u610F\uFF09").addText(
+      (text) => text.setValue(this.plugin.settings.calendar.name).onChange(async (value) => {
+        this.plugin.settings.calendar.name = value;
+        await this.plugin.saveSettings();
+        this.plugin.notifySettingsChanged();
+      })
+    );
+    this.buildCalendarTable(containerEl);
+    new import_obsidian3.Setting(containerEl).setName("\u6708\u3092\u8FFD\u52A0").setDesc("\u66A6\u306B\u6708\u3092\u8FFD\u52A0\u3057\u307E\u3059").addButton(
+      (btn) => btn.setButtonText("\uFF0B \u6708\u3092\u8FFD\u52A0").onClick(async () => {
+        const months = this.plugin.settings.calendar.months;
+        const nextMonth = months.length + 1;
+        months.push({ month: nextMonth, name: "", days: 30 });
+        await this.plugin.saveSettings();
+        this.plugin.notifySettingsChanged();
+        this.display();
+      })
+    );
+    new import_obsidian3.Setting(containerEl).setName("\u30C7\u30D5\u30A9\u30EB\u30C8\u66A6\u306B\u623B\u3059").setDesc("\u66A6\u540D\u3092\u300C\u897F\u66A6\u300D\u3001\u6708\u540D\u3092\u672A\u8A2D\u5B9A\u306B\u30EA\u30BB\u30C3\u30C8\u3057\u307E\u3059").addButton(
+      (btn) => btn.setButtonText("\u30EA\u30BB\u30C3\u30C8").setWarning().onClick(async () => {
+        this.plugin.settings.calendar = JSON.parse(JSON.stringify(DEFAULT_CALENDAR));
+        await this.plugin.saveSettings();
+        this.plugin.notifySettingsChanged();
+        this.display();
+      })
+    );
+    containerEl.createEl("h2", { text: "Advanced" });
     new import_obsidian3.Setting(containerEl).setName("Virtual Rendering").setDesc("\u4EEE\u60F3\u63CF\u753B\uFF08\u8868\u793A\u7BC4\u56F2\u5916\u306E\u30CE\u30FC\u30C9\u3092\u63CF\u753B\u3057\u306A\u3044\uFF09").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.virtualRendering).onChange(async (value) => {
         this.plugin.settings.virtualRendering = value;
@@ -6883,20 +6880,6 @@ var NovelsTimelineSettingTab = class extends import_obsidian3.PluginSettingTab {
         }
       })
     );
-    containerEl.createEl("h2", { text: "Advanced" });
-    new import_obsidian3.Setting(containerEl).setName("\u65B0\u898F\u30A4\u30D9\u30F3\u30C8\u306E\u4FDD\u5B58\u5148\u30D5\u30A9\u30EB\u30C0").setDesc("\u53F3\u30AF\u30EA\u30C3\u30AF\u3067\u4F5C\u6210\u3059\u308B\u30A4\u30D9\u30F3\u30C8\u30CE\u30FC\u30C8\u306E\u4FDD\u5B58\u5148\uFF08\u7A7A\u306E\u5834\u5408\u306F Vault \u30EB\u30FC\u30C8\uFF09").addText(
-      (text) => text.setPlaceholder("\u4F8B: events / stories/chapter1").setValue(this.plugin.settings.newEventFolder).onChange(async (value) => {
-        this.plugin.settings.newEventFolder = value.trim().replace(/\/$/, "");
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian3.Setting(containerEl).setName("Debug Mode").setDesc("\u30C7\u30D0\u30C3\u30B0\u60C5\u5831\u3092\u30B3\u30F3\u30BD\u30FC\u30EB\u306B\u51FA\u529B\u3059\u308B").addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.debugMode).onChange(async (value) => {
-        this.plugin.settings.debugMode = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    );
     new import_obsidian3.Setting(containerEl).setName("Rebuild Cache").setDesc("\u30AD\u30E3\u30C3\u30B7\u30E5\u3092\u524A\u9664\u3057\u3066\u5168\u518D\u89E3\u6790\u3059\u308B").addButton(
       (btn) => btn.setButtonText("\u518D\u69CB\u7BC9").onClick(async () => {
         const view = this.plugin.getTimelineView();
@@ -6905,15 +6888,6 @@ var NovelsTimelineSettingTab = class extends import_obsidian3.PluginSettingTab {
           new import_obsidian3.Notice("\u30AD\u30E3\u30C3\u30B7\u30E5\u3092\u518D\u69CB\u7BC9\u3057\u307E\u3057\u305F");
         } else {
           new import_obsidian3.Notice("\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u30D3\u30E5\u30FC\u304C\u958B\u3044\u3066\u3044\u307E\u305B\u3093");
-        }
-      })
-    );
-    new import_obsidian3.Setting(containerEl).setName("Clear Cache").setDesc("\u30AD\u30E3\u30C3\u30B7\u30E5\u30D5\u30A1\u30A4\u30EB\u3092\u524A\u9664\u3059\u308B").addButton(
-      (btn) => btn.setButtonText("\u524A\u9664").setWarning().onClick(async () => {
-        const view = this.plugin.getTimelineView();
-        if (view) {
-          await view.rebuildAll();
-          new import_obsidian3.Notice("\u30AD\u30E3\u30C3\u30B7\u30E5\u3092\u524A\u9664\u3057\u307E\u3057\u305F");
         }
       })
     );

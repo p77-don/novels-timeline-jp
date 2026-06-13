@@ -282,7 +282,7 @@ export class EventSidebarView extends ItemView {
       .filter(name => /^\d{4}-/.test(name) && name !== selfId)
       .sort();
 
-    const placeholder = select.createEl("option", { text: "── イベントを選択 ──" });
+    const placeholder = select.createEl("option", { text: "▼イベントを選択" });
     placeholder.value = "";
     placeholder.disabled = true;
     placeholder.selected = true;

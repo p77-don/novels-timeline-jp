@@ -60,8 +60,10 @@ export class GapEngine {
       const before = sortedEvents[i];
       const after  = sortedEvents[i + 1];
       const diff   = after.timelineOrder - before.timelineOrder;
+      // 両端を除いた実際の空き日数で threshold を比較する
+      const gapDays = Math.max(0, diff - 1);
 
-      if (diff < threshold) continue;
+      if (gapDays < threshold) continue;
 
       const yBefore = yPositions.get(before.id) ?? 0;
       const yAfter  = yPositions.get(after.id)  ?? 0;
@@ -149,11 +151,15 @@ export class GapEngine {
     const diff = after.timelineOrder - before.timelineOrder;
     const key  = this.gapKeyFromOrders(before.timelineOrder, after.timelineOrder);
 
+    // Gapの「日数」は両端イベントの当日を含まない期間なので diff-1 を使う
+    // 例: 5/10 と 5/20 の間に存在しない日は 5/11〜5/19 の9日間
+    const gapDays = Math.max(0, diff - 1);
+
     return {
       fromOrder: before.timelineOrder,
       toOrder:   after.timelineOrder,
       y:         (yBefore + yAfter) / 2,
-      label:     this.formatDiff(diff),
+      label:     this.formatDiff(gapDays),
       expanded:  this.expandedKeys.has(key),
     };
   }
