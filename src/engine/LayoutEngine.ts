@@ -255,42 +255,85 @@ export class LayoutEngine {
    * @param calendarPrefix  暦プレフィックス（例: "帝国暦"）。
    *                        呼び出し元で既存イベントのprefixを渡すこと。
    */
-  yToDateString(
-    clickY: number,
-    sortedEvents: TimelineEvent[],
+  /**
+   * クリック位置(ビューポートY)から日付文字列を逆算する。
+   *
+   * 【設計方針】
+   * - nodes[i].y は calcYByDayGroup が生成した SVGユーザー座標（実際の描画Y）。
+   * - ビューポートY = node.y - scrollTop。
+   * - クリック位置 viewportY (= e.offsetY) と同じ座標系なので変換不要。
+   * - Gap展開/折りたたみ状態に関係なく、nodes の y 値は常に正しい描画位置を示す。
+   * - 区間ごとの px/日 定数で orderDiff を復元し、最初のイベントの order を基点に加算する。
+   */
+  orderFromViewportY(
+    viewportY: number,
+    scrollTop: number,
+    nodes: LayoutNode[],
     gaps: GapSegment[],
     gapCompression: boolean,
     calendarPrefix = ""
   ): string {
-    if (sortedEvents.length === 0) {
+    if (nodes.length === 0) {
       return this.orderToDateString(0, calendarPrefix);
     }
 
-    const groups   = this.groupByDay(sortedEvents);
-    const yByOrder = this.calcYByDayGroup(groups, gaps, gapCompression);
-
-    const yEntries = Array.from(yByOrder.entries())
-      .map(([order, y]) => ({ order, y }))
-      .sort((a, b) => a.y - b.y);
-
-    if (clickY <= yEntries[0].y) {
-      return this.orderToDateString(Math.max(0, yEntries[0].order - 1), calendarPrefix);
-    }
-    if (clickY >= yEntries[yEntries.length - 1].y) {
-      return this.orderToDateString(yEntries[yEntries.length - 1].order + 1, calendarPrefix);
-    }
-
-    for (let i = 0; i < yEntries.length - 1; i++) {
-      const cur  = yEntries[i];
-      const next = yEntries[i + 1];
-      if (clickY >= cur.y && clickY <= next.y) {
-        const t = (next.y - cur.y) > 0 ? (clickY - cur.y) / (next.y - cur.y) : 0;
-        const estimatedOrder = Math.round(cur.order + t * (next.order - cur.order));
-        return this.orderToDateString(estimatedOrder, calendarPrefix);
+    // ① ユニークな (order, viewportY) エントリをノードから生成
+    //    同日ノードは同じ y を持つので重複排除する
+    const seen = new Map<number, number>(); // order → svgY
+    for (const node of nodes) {
+      if (!seen.has(node.event.timelineOrder)) {
+        seen.set(node.event.timelineOrder, node.y);
       }
     }
+    const entries = Array.from(seen.entries())
+      .map(([order, svgY]) => ({ order, vy: svgY - scrollTop }))
+      .sort((a, b) => a.vy - b.vy);
 
-    return this.orderToDateString(0, calendarPrefix);
+    // ② 境界チェック
+    const first = entries[0];
+    const last  = entries[entries.length - 1];
+
+    if (viewportY <= first.vy) {
+      return this.orderToDateString(Math.max(0, first.order - 1), calendarPrefix);
+    }
+    if (viewportY >= last.vy) {
+      return this.orderToDateString(last.order + 1, calendarPrefix);
+    }
+
+    // ③ 区間を特定して order を計算
+    for (let i = 0; i < entries.length - 1; i++) {
+      const cur  = entries[i];
+      const next = entries[i + 1];
+      if (viewportY < cur.vy || viewportY > next.vy) continue;
+
+      const segH = next.vy - cur.vy;
+      if (segH <= 0) {
+        return this.orderToDateString(cur.order, calendarPrefix);
+      }
+
+      const dy        = viewportY - cur.vy;
+      const orderDiff = next.order - cur.order;
+
+      // 【重要】t = dy / segH（実際のセグメント高さで割る）を使う。
+      // calcYByDayGroup は Math.max(MIN_Y_GAP, orderDiff*Y_SCALE) や
+      // Math.max(EXPANDED_MIN_HEIGHT, orderDiff*EXPANDED_PX_PER_DAY) で
+      // Y高さを決めるため、「日数 ≠ Y/定数」になるケースがある。
+      // t = dy/segH → t*orderDiff なら実際のY比率がそのまま日数比率になり、
+      // MIN_Y_GAP / EXPANDED_MIN_HEIGHT の影響を完全に吸収できる。
+      const t = dy / segH;
+      const rawOrder = Math.round(cur.order + t * orderDiff);
+      const estimatedOrder = Math.max(cur.order, Math.min(next.order, rawOrder));
+      return this.orderToDateString(estimatedOrder, calendarPrefix);
+    }
+
+    // フォールバック: 最近傍エントリのorderを返す（絶対に year=1 にしない）
+    let nearest = entries[0];
+    let minDist = Math.abs(viewportY - entries[0].vy);
+    for (const e of entries) {
+      const d = Math.abs(viewportY - e.vy);
+      if (d < minDist) { minDist = d; nearest = e; }
+    }
+    return this.orderToDateString(nearest.order, calendarPrefix);
   }
 
   /**

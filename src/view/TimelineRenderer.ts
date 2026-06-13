@@ -58,7 +58,7 @@ export interface RenderContext {
   onNodeHover:   (event: TimelineEvent, node: LayoutNode, mouseX: number, mouseY: number) => void;
   onNodeLeave:   () => void;
   onGapClick:    (gap: GapSegment) => void;
-  onContextMenu: (svgY: number, mouseX: number, mouseY: number) => void;
+  onContextMenu: (viewportY: number, scrollTop: number, mouseX: number, mouseY: number) => void;
   onLaneDrop:    (eventId: string, newLane: number) => void;
 }
 
@@ -135,17 +135,10 @@ export class TimelineRenderer {
 
     this.svg.oncontextmenu = (e: MouseEvent) => {
       e.preventDefault();
-      // SVGユーザー座標への正しい変換:
-      //   offsetY = SVG要素のCSSレイアウト上の上端からのY（0〜rect.height）
-      //   scaleY  = SVGユーザー高さ(height属性値) / CSSレイアウト高さ(rect.height)
-      //             SVGがコンテナにクリップされている場合は totalHeight/containerHeight
-      //             SVGが全高表示の場合は 1.0
-      //   SVGユーザーY = scrollTop + offsetY * scaleY
-      const rect   = this.svg.getBoundingClientRect();
-      const totalH = parseFloat(this.svg.getAttribute("height") ?? "1");
-      const scaleY = totalH / (rect.height || 1);
-      const svgY   = this.container.scrollTop + e.offsetY * scaleY;
-      ctx.onContextMenu(svgY, e.clientX, e.clientY);
+      // ビューポートY座標（e.offsetY）と scrollTop を直接渡す。
+      // yToDateString 側でビューポートY基準で区間判定するため、
+      // SVGユーザー座標への変換（scaleY計算）は不要。
+      ctx.onContextMenu(e.offsetY, this.container.scrollTop, e.clientX, e.clientY);
     };
     this.svg.onmousemove = (e: MouseEvent) => {
       this.tooltip.move(e.clientX, e.clientY);
