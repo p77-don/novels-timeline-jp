@@ -59,6 +59,8 @@ var DEFAULT_SETTINGS = {
   relationArrowStyle: "arrow",
   relationOpacity: 0.6,
   relationCurveStrength: 50,
+  leftLaneTitle: "",
+  rightLaneTitle: "",
   virtualRendering: true,
   renderBuffer: 1500,
   relationDisplayMode: "selected",
@@ -5162,7 +5164,9 @@ var COLOR = {
 };
 var TimelineRenderer = class {
   constructor(container) {
-    this.dragState = { active: false, eventId: "", startX: 0, currentX: 0, laneWidth: 40, circle: null };
+    this._lastCenterX = 440;
+    // render() で更新、drag時に参照
+    this.dragState = { active: false, eventId: "", startX: 0, currentX: 0, laneWidth: 40, circle: null, originalLane: 0 };
     this.container = container;
     this.svg = document.createElementNS(SVG_NS2, "svg");
     this.svg.setAttribute("xmlns", SVG_NS2);
@@ -5174,12 +5178,14 @@ var TimelineRenderer = class {
   // メイン描画
   // ----------------------------------------------------------
   render(ctx) {
+    var _a, _b;
     const { settings, totalHeight, virtualWindow } = ctx;
     const LANE_W = 40;
     const AXIS_W = LANE_W * 2;
     const LANES = 10;
     const svgWidth = LANE_W * LANES + AXIS_W + LANE_W * LANES;
     const centerX = LANE_W * LANES + AXIS_W / 2;
+    this._lastCenterX = centerX;
     this.svg.setAttribute("viewBox", `0 0 ${svgWidth} ${totalHeight}`);
     this.svg.setAttribute("width", String(svgWidth));
     this.svg.setAttribute("height", String(totalHeight));
@@ -5191,14 +5197,23 @@ var TimelineRenderer = class {
     const defs = document.createElementNS(SVG_NS2, "defs");
     this.svg.appendChild(defs);
     const ctxWithCenter = { ...ctx, centerX };
-    this.drawRuler(centerX, svgWidth, LANE_W, AXIS_W, LANES, virtualWindow.scrollTop);
+    this.drawRuler(
+      centerX,
+      svgWidth,
+      LANE_W,
+      AXIS_W,
+      LANES,
+      virtualWindow.scrollTop,
+      (_a = ctx.leftLaneTitle) != null ? _a : "",
+      (_b = ctx.rightLaneTitle) != null ? _b : ""
+    );
     this.drawTimeAxis(centerX, totalHeight);
     if (settings.gapCompression) {
       this.drawGaps(ctxWithCenter, visTop, visBottom);
     }
     this.drawDateLabels(ctxWithCenter, visTop, visBottom);
-    this.drawNodes(ctxWithCenter, visTop, visBottom);
     this.drawRelations(ctxWithCenter, visTop, visBottom, defs);
+    this.drawNodes(ctxWithCenter, visTop, visBottom);
     this.svg.oncontextmenu = (e) => {
       e.preventDefault();
       ctx.onContextMenu(e.offsetY, e.clientX, e.clientY);
@@ -5213,9 +5228,59 @@ var TimelineRenderer = class {
   // レーンルーラー（タイムライン上部のレーン番号表示）
   // スクロールに追従して常に上部に固定表示する
   // ----------------------------------------------------------
-  drawRuler(centerX, svgWidth, laneW, axisW, lanes, scrollTop) {
+  drawRuler(centerX, svgWidth, laneW, axisW, lanes, scrollTop, leftLaneTitle, rightLaneTitle) {
+    const hasTitles = leftLaneTitle.trim() !== "" || rightLaneTitle.trim() !== "";
+    const titleH = hasTitles ? 20 : 0;
     const rulerH = 28;
-    const rulerY = scrollTop;
+    const rulerY = scrollTop + titleH;
+    const titleY = scrollTop;
+    const axisLeft = centerX - axisW / 2;
+    const leftAreaLeft = axisLeft - lanes * laneW;
+    const rightAreaRight = axisLeft + axisW + lanes * laneW;
+    if (hasTitles) {
+      const titleBg = document.createElementNS(SVG_NS2, "rect");
+      titleBg.setAttribute("x", "0");
+      titleBg.setAttribute("y", String(titleY));
+      titleBg.setAttribute("width", String(svgWidth));
+      titleBg.setAttribute("height", String(titleH));
+      titleBg.setAttribute("fill", "var(--background-primary-alt)");
+      this.svg.appendChild(titleBg);
+      if (leftLaneTitle.trim() !== "") {
+        const leftTitleX = leftAreaLeft + (axisLeft - leftAreaLeft) / 2;
+        const lt = document.createElementNS(SVG_NS2, "text");
+        lt.setAttribute("x", String(leftTitleX));
+        lt.setAttribute("y", String(titleY + titleH / 2));
+        lt.setAttribute("text-anchor", "middle");
+        lt.setAttribute("dominant-baseline", "central");
+        lt.setAttribute("font-size", "11");
+        lt.setAttribute("font-weight", "600");
+        lt.setAttribute("fill", "var(--text-normal)");
+        lt.textContent = leftLaneTitle;
+        this.svg.appendChild(lt);
+      }
+      if (rightLaneTitle.trim() !== "") {
+        const rightAreaLeft = axisLeft + axisW;
+        const rightTitleX = rightAreaLeft + (rightAreaRight - rightAreaLeft) / 2;
+        const rt = document.createElementNS(SVG_NS2, "text");
+        rt.setAttribute("x", String(rightTitleX));
+        rt.setAttribute("y", String(titleY + titleH / 2));
+        rt.setAttribute("text-anchor", "middle");
+        rt.setAttribute("dominant-baseline", "central");
+        rt.setAttribute("font-size", "11");
+        rt.setAttribute("font-weight", "600");
+        rt.setAttribute("fill", "var(--text-accent)");
+        rt.textContent = rightLaneTitle;
+        this.svg.appendChild(rt);
+      }
+      const titleBorder = document.createElementNS(SVG_NS2, "line");
+      titleBorder.setAttribute("x1", "0");
+      titleBorder.setAttribute("y1", String(titleY + titleH));
+      titleBorder.setAttribute("x2", String(svgWidth));
+      titleBorder.setAttribute("y2", String(titleY + titleH));
+      titleBorder.setAttribute("stroke", "var(--background-modifier-border)");
+      titleBorder.setAttribute("stroke-width", "0.5");
+      this.svg.appendChild(titleBorder);
+    }
     const bg = document.createElementNS(SVG_NS2, "rect");
     bg.setAttribute("x", "0");
     bg.setAttribute("y", String(rulerY));
@@ -5223,7 +5288,6 @@ var TimelineRenderer = class {
     bg.setAttribute("height", String(rulerH));
     bg.setAttribute("fill", "var(--background-secondary)");
     this.svg.appendChild(bg);
-    const axisLeft = centerX - axisW / 2;
     for (let lane = -lanes; lane <= -1; lane++) {
       const cellLeft = axisLeft + lane * laneW;
       const cellCenterX = cellLeft + laneW / 2;
@@ -5552,13 +5616,10 @@ var TimelineRenderer = class {
   // ----------------------------------------------------------
   // 関係線描画
   // ----------------------------------------------------------
-  drawRelations(ctx, visTop, visBottom, defs) {
+  drawRelations(ctx, visTop, visBottom, _defs) {
     const { edges, selectedId, settings } = ctx;
     const mode = settings.relationDisplayMode;
     if (mode === "hidden") return;
-    if (settings.relationArrowStyle !== "none") {
-      this.addArrowMarker(defs, settings);
-    }
     for (const edge of edges) {
       if (mode === "selected") {
         if (edge.fromId !== selectedId && edge.toId !== selectedId) continue;
@@ -5574,50 +5635,60 @@ var TimelineRenderer = class {
     const strength = settings.relationCurveStrength;
     const dy = toNode.y - fromNode.y;
     const cpOffset = strength / 100 * Math.max(40, Math.abs(dy) * 0.4);
+    const d = `M ${fromNode.x} ${fromNode.y} C ${fromNode.x + cpOffset} ${fromNode.y + dy * 0.3}, ${toNode.x - cpOffset} ${toNode.y - dy * 0.3}, ${toNode.x} ${toNode.y}`;
     const path = document.createElementNS(SVG_NS2, "path");
-    path.setAttribute(
-      "d",
-      `M ${fromNode.x} ${fromNode.y} C ${fromNode.x + cpOffset} ${fromNode.y + dy * 0.3}, ${toNode.x - cpOffset} ${toNode.y - dy * 0.3}, ${toNode.x} ${toNode.y}`
-    );
+    path.setAttribute("d", d);
     path.setAttribute("fill", "none");
     path.setAttribute("stroke", settings.relationColor);
     path.setAttribute("stroke-width", String(settings.relationWidth));
     path.setAttribute("stroke-opacity", String(settings.relationOpacity));
     if (settings.relationStyle === "dashed") path.setAttribute("stroke-dasharray", "6 4");
     else if (settings.relationStyle === "dotted") path.setAttribute("stroke-dasharray", "2 4");
-    if (settings.relationArrowStyle !== "none") {
-      const colorKey = settings.relationColor.replace(/[^a-zA-Z0-9]/g, "");
-      path.setAttribute("marker-end", `url(#ntj-arrow-${settings.relationArrowStyle}-${colorKey})`);
-    }
     this.svg.appendChild(path);
-  }
-  addArrowMarker(defs, settings) {
-    const style = settings.relationArrowStyle;
-    const colorKey = settings.relationColor.replace(/[^a-zA-Z0-9]/g, "");
-    const markerId = `ntj-arrow-${style}-${colorKey}`;
-    if (defs.querySelector(`#${markerId}`)) return;
-    const marker = document.createElementNS(SVG_NS2, "marker");
-    marker.setAttribute("id", markerId);
-    marker.setAttribute("viewBox", "0 0 10 10");
-    marker.setAttribute("refX", "8");
-    marker.setAttribute("refY", "5");
-    marker.setAttribute("markerWidth", "6");
-    marker.setAttribute("markerHeight", "6");
-    marker.setAttribute("orient", "auto-start-reverse");
-    const shape = document.createElementNS(SVG_NS2, "path");
-    if (style === "triangle") {
-      shape.setAttribute("d", "M0 0L10 5L0 10Z");
-      shape.setAttribute("fill", settings.relationColor);
-      shape.setAttribute("stroke", "none");
-    } else {
-      shape.setAttribute("d", "M2 1L8 5L2 9");
-      shape.setAttribute("fill", "none");
-      shape.setAttribute("stroke", settings.relationColor);
-      shape.setAttribute("stroke-width", "1.5");
-      shape.setAttribute("stroke-linecap", "round");
+    if (settings.relationArrowStyle !== "none") {
+      this.drawMidArrow(path, settings);
     }
-    marker.appendChild(shape);
-    defs.appendChild(marker);
+  }
+  /**
+   * SVGパスの50%地点の座標・接線方向を求め、矢印ポリゴンを配置する
+   */
+  drawMidArrow(path, settings) {
+    let len;
+    try {
+      len = path.getTotalLength();
+    } catch (e) {
+      return;
+    }
+    if (!len || len < 2) return;
+    const mid = path.getPointAtLength(len * 0.5);
+    const next = path.getPointAtLength(len * 0.5 + 1);
+    const angle = Math.atan2(next.y - mid.y, next.x - mid.x) * 180 / Math.PI;
+    const style = settings.relationArrowStyle;
+    const color = settings.relationColor;
+    const opacity = settings.relationOpacity;
+    const sw = settings.relationWidth;
+    if (style === "triangle") {
+      const size = 5 + sw;
+      const tri = document.createElementNS(SVG_NS2, "polygon");
+      tri.setAttribute("points", `${size},0 ${-size * 0.6},${-size * 0.5} ${-size * 0.6},${size * 0.5}`);
+      tri.setAttribute("fill", color);
+      tri.setAttribute("fill-opacity", String(opacity));
+      tri.setAttribute("stroke", "none");
+      tri.setAttribute("transform", `translate(${mid.x},${mid.y}) rotate(${angle})`);
+      this.svg.appendChild(tri);
+    } else {
+      const size = 5 + sw * 0.8;
+      const arr = document.createElementNS(SVG_NS2, "path");
+      arr.setAttribute("d", `M${-size},${-size} L0,0 L${-size},${size}`);
+      arr.setAttribute("fill", "none");
+      arr.setAttribute("stroke", color);
+      arr.setAttribute("stroke-width", String(Math.max(1.2, sw * 0.8)));
+      arr.setAttribute("stroke-opacity", String(opacity));
+      arr.setAttribute("stroke-linecap", "round");
+      arr.setAttribute("stroke-linejoin", "round");
+      arr.setAttribute("transform", `translate(${mid.x},${mid.y}) rotate(${angle})`);
+      this.svg.appendChild(arr);
+    }
   }
   // ----------------------------------------------------------
   // Gap 描画
@@ -5640,26 +5711,61 @@ var TimelineRenderer = class {
       eventId: node.event.id,
       startX: e.clientX,
       currentX: e.clientX,
-      laneWidth: 80,
-      circle
+      laneWidth: 40,
+      circle,
+      originalLane: node.event.lane
     };
     circle.style.cursor = "grabbing";
   }
   onDragMove(e, _ctx) {
-    var _a;
     if (!this.dragState.active || !this.dragState.circle) return;
-    const svgDx = this.clientDxToSvgDx(e.clientX - this.dragState.currentX);
-    const cx = parseFloat((_a = this.dragState.circle.getAttribute("cx")) != null ? _a : "0");
-    this.dragState.circle.setAttribute("cx", String(cx + svgDx));
-    this.dragState.currentX = e.clientX;
+    const totalClientDx = e.clientX - this.dragState.startX;
+    const totalSvgDx = this.clientDxToSvgDx(totalClientDx);
+    const originX = this.laneToSvgX(this.dragState.originalLane, this._lastCenterX);
+    this.dragState.circle.setAttribute("cx", String(originX + totalSvgDx));
   }
   onDragEnd(e, ctx) {
     if (!this.dragState.active) return;
-    const totalDx = e.clientX - this.dragState.startX;
-    const laneShift = Math.round(this.clientDxToSvgDx(totalDx) / this.dragState.laneWidth);
-    if (laneShift !== 0) ctx.onLaneDrop(this.dragState.eventId, laneShift);
+    const totalClientDx = e.clientX - this.dragState.startX;
+    const totalSvgDx = this.clientDxToSvgDx(totalClientDx);
+    const originX = this.laneToSvgX(this.dragState.originalLane, this._lastCenterX);
+    const droppedX = originX + totalSvgDx;
+    const targetLane = this.svgXToLane(droppedX, this._lastCenterX);
+    ctx.onLaneDrop(this.dragState.eventId, targetLane);
     if (this.dragState.circle) this.dragState.circle.style.cursor = "grab";
     this.dragState.active = false;
+  }
+  /** lane番号 → SVG X座標（LayoutEngine.calcX と同じ式） */
+  laneToSvgX(lane, centerX) {
+    const LANE_W = 40;
+    if (lane === 0) return centerX;
+    if (lane > 0) return centerX + LANE_W / 2 + lane * LANE_W;
+    return centerX - LANE_W / 2 + lane * LANE_W;
+  }
+  /** SVG X座標 → 最近傍のlane番号（0は除外） */
+  svgXToLane(x, centerX) {
+    const LANE_W = 40;
+    let bestLane = 1;
+    let bestDist = Infinity;
+    for (let lane = -10; lane <= 10; lane++) {
+      if (lane === 0) continue;
+      const lx = this.laneToSvgX(lane, centerX);
+      const dist = Math.abs(x - lx);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestLane = lane;
+      }
+    }
+    return bestLane;
+  }
+  /** クライアントpx差分 → SVGユーザー座標差分 */
+  clientDxToSvgDx(clientDx) {
+    var _a;
+    const ctm = this.svg.getScreenCTM();
+    if (ctm && ctm.a !== 0) return clientDx / ctm.a;
+    const rect = this.svg.getBoundingClientRect();
+    const totalW = parseFloat((_a = this.svg.getAttribute("width")) != null ? _a : "880");
+    return clientDx * (totalW / (rect.width || totalW));
   }
   // ----------------------------------------------------------
   // ユーティリティ
@@ -5673,12 +5779,6 @@ var TimelineRenderer = class {
     const rect = this.svg.getBoundingClientRect();
     const totalH = parseFloat((_a = this.svg.getAttribute("height")) != null ? _a : "1");
     return (clientY - rect.top + this.container.scrollTop) * (totalH / (rect.height || 1));
-  }
-  clientDxToSvgDx(clientDx) {
-    var _a;
-    const rect = this.svg.getBoundingClientRect();
-    const totalW = parseFloat((_a = this.svg.getAttribute("width")) != null ? _a : "1");
-    return clientDx * (totalW / (rect.width || 1));
   }
   getSvgElement() {
     return this.svg;
@@ -5752,6 +5852,14 @@ var TimelineView = class extends import_obsidian.ItemView {
     this.debugOverlay = this.timelineEl.createDiv({ cls: "ntj-debug-overlay" });
     this.debugOverlay.style.display = "none";
     this.timelineEl.addEventListener("scroll", () => this.scheduleRender());
+    this.timelineEl.addEventListener("dblclick", (e) => {
+      const target = e.target;
+      if (target && target.tagName === "circle") return;
+      if (this.selectedId !== null) {
+        this.selectedId = null;
+        this.scheduleRender();
+      }
+    });
     this.timelineEl.addEventListener("wheel", (e) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
@@ -5972,6 +6080,7 @@ var TimelineView = class extends import_obsidian.ItemView {
     this.renderTimer = setTimeout(() => this.doRender(), 50);
   }
   doRender() {
+    var _a, _b;
     const t0 = performance.now();
     const settings = this.plugin.settings;
     const allEvents = this.eventStore.getAllSorted();
@@ -6031,7 +6140,9 @@ var TimelineView = class extends import_obsidian.ItemView {
       },
       onGapClick: (gap) => this.handleGapClick(gap),
       onContextMenu: (svgY, mx, my) => this.handleContextMenu(svgY, mx, my),
-      onLaneDrop: (eventId, laneShift) => this.handleLaneDrop(eventId, laneShift)
+      onLaneDrop: (eventId, laneShift) => this.handleLaneDrop(eventId, laneShift),
+      leftLaneTitle: (_a = this.plugin.settings.leftLaneTitle) != null ? _a : "",
+      rightLaneTitle: (_b = this.plugin.settings.rightLaneTitle) != null ? _b : ""
     });
     const t1 = performance.now();
     this.updateDebugOverlay(validEvents.length, this.nodes.length, this.gaps.length, t1 - t0);
@@ -6104,10 +6215,12 @@ var TimelineView = class extends import_obsidian.ItemView {
     }
     menu.showAtPosition({ x: mouseX, y: mouseY });
   }
-  async handleLaneDrop(eventId, laneShift) {
+  async handleLaneDrop(eventId, targetLane) {
     const event = this.eventStore.getById(eventId);
     if (!event) return;
-    const newLane = Math.max(LANE_MIN, Math.min(LANE_MAX, event.lane + laneShift));
+    let newLane = targetLane;
+    if (newLane === 0) newLane = targetLane >= event.lane ? 1 : -1;
+    newLane = Math.max(LANE_MIN, Math.min(LANE_MAX, newLane));
     if (newLane === event.lane) return;
     const updated = { ...event, lane: newLane };
     this.eventStore.upsert(updated);
@@ -6674,54 +6787,53 @@ var EventSidebarView = class extends import_obsidian2.ItemView {
   // ----------------------------------------------------------
   // timelineブロック書き換え
   // ----------------------------------------------------------
+  /**
+   * ブロック本文を毎回完全に組み直す。
+   * フィールド順序は仕様通り固定：
+   *   1.date  2.lane  3.size  4.color
+   *   5.characters  6.locations  7.summary  8.links
+   * キーの有無・元の順序に関わらず常に同じレイアウトで書き出す。
+   */
   rewriteBlock(content, fields) {
     return content.replace(
       /(^`{3,}novels_timeline_jp\s*$)([\s\S]*?)(^`{3,}\s*$)/m,
-      (_match, open, body, close) => {
+      (_match, open, _body, close) => {
         var _a;
-        let b = body;
-        b = b.replace(/^(date\s*:\s*).*$/m, `$1${fields.date}`);
-        b = b.replace(/^(lane\s*:\s*).*$/m, `$1${fields.lane}`);
-        b = b.replace(/^(size\s*:\s*).*$/m, `$1${fields.size}`);
-        b = b.replace(/^(color\s*:\s*).*$/m, `$1"${fields.color}"`);
-        b = b.replace(/^(summary\s*:\s*).*$/m, `$1${(_a = fields.summary) != null ? _a : ""}`);
-        b = this.rewriteListField(b, "characters", fields.characters);
-        b = this.rewriteListField(b, "locations", fields.locations);
-        b = this.rewriteLinksField(b, fields.links);
-        return open + b + close;
+        const lines = [];
+        lines.push(`date: ${fields.date}`);
+        lines.push("");
+        lines.push(`lane: ${fields.lane}`);
+        lines.push("");
+        lines.push(`size: ${fields.size}`);
+        lines.push("");
+        lines.push(`color: "${fields.color}"`);
+        lines.push("");
+        if (fields.characters.length > 0) {
+          lines.push("characters:");
+          for (const c of fields.characters) lines.push(`  - ${c}`);
+        } else {
+          lines.push("characters:");
+        }
+        lines.push("");
+        if (fields.locations.length > 0) {
+          lines.push("locations:");
+          for (const l of fields.locations) lines.push(`  - ${l}`);
+        } else {
+          lines.push("locations:");
+        }
+        lines.push("");
+        lines.push(`summary: ${(_a = fields.summary) != null ? _a : ""}`);
+        lines.push("");
+        if (fields.links.length > 0) {
+          lines.push("links:");
+          for (const l of fields.links) lines.push(`  - "[[${l}]]"`);
+        } else {
+          lines.push("links:");
+        }
+        lines.push("");
+        return open + "\n" + lines.join("\n") + close;
       }
     );
-  }
-  rewriteListField(body, key, values) {
-    const lines = body.split("\n");
-    const newLines = [];
-    let i = 0;
-    while (i < lines.length) {
-      if (new RegExp(`^${key}\\s*:`).test(lines[i])) {
-        newLines.push(values.length ? `${key}:
-` + values.map((v) => `  - ${v}`).join("\n") : `${key}:`);
-        i++;
-        while (i < lines.length && /^\s+-/.test(lines[i])) i++;
-      } else {
-        newLines.push(lines[i++]);
-      }
-    }
-    return newLines.join("\n");
-  }
-  rewriteLinksField(body, links) {
-    const lines = body.split("\n");
-    const newLines = [];
-    let i = 0;
-    while (i < lines.length) {
-      if (/^links\s*:/.test(lines[i])) {
-        newLines.push(links.length ? "links:\n" + links.map((l) => `  - "[[${l}]]"`).join("\n") : "links:");
-        i++;
-        while (i < lines.length && /^\s+-/.test(lines[i])) i++;
-      } else {
-        newLines.push(lines[i++]);
-      }
-    }
-    return newLines.join("\n");
   }
   // ----------------------------------------------------------
   // ユーティリティ
@@ -6854,6 +6966,20 @@ var NovelsTimelineSettingTab = class extends import_obsidian3.PluginSettingTab {
           await this.plugin.saveSettings();
           this.plugin.notifySettingsChanged();
         }
+      })
+    );
+    new import_obsidian3.Setting(containerEl).setName("\u5DE6\u30EC\u30FC\u30F3\u30BF\u30A4\u30C8\u30EB").setDesc("\u30EC\u30FC\u30F3 -1\u301C-10 \u306E\u4E0A\u90E8\u306B\u8868\u793A\u3059\u308B\u30BF\u30A4\u30C8\u30EB\uFF08\u4EFB\u610F\uFF09\u3002\u4F8B\uFF1A\u8868\u30B5\u30A4\u30C9").addText(
+      (text) => text.setPlaceholder("\u4F8B: \u8868\u30B5\u30A4\u30C9").setValue(this.plugin.settings.leftLaneTitle).onChange(async (value) => {
+        this.plugin.settings.leftLaneTitle = value;
+        await this.plugin.saveSettings();
+        this.plugin.notifySettingsChanged();
+      })
+    );
+    new import_obsidian3.Setting(containerEl).setName("\u53F3\u30EC\u30FC\u30F3\u30BF\u30A4\u30C8\u30EB").setDesc("\u30EC\u30FC\u30F3 1\u301C10 \u306E\u4E0A\u90E8\u306B\u8868\u793A\u3059\u308B\u30BF\u30A4\u30C8\u30EB\uFF08\u4EFB\u610F\uFF09\u3002\u4F8B\uFF1A\u88CF\u30B5\u30A4\u30C9").addText(
+      (text) => text.setPlaceholder("\u4F8B: \u88CF\u30B5\u30A4\u30C9").setValue(this.plugin.settings.rightLaneTitle).onChange(async (value) => {
+        this.plugin.settings.rightLaneTitle = value;
+        await this.plugin.saveSettings();
+        this.plugin.notifySettingsChanged();
       })
     );
     containerEl.createEl("h2", { text: "Calendar\uFF08\u66A6\u8A2D\u5B9A\uFF09" });

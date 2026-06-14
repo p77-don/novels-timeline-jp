@@ -73,6 +73,12 @@ export interface NovelsTimelineSettings {
   /** ベジェ曲率（0〜100） */
   relationCurveStrength: number;
 
+  // --- Lane Titles ---
+  /** 左レーン（-1〜-10）のタイトル（任意） */
+  leftLaneTitle: string;
+  /** 右レーン（1〜10）のタイトル（任意） */
+  rightLaneTitle: string;
+
   // --- Advanced ---
   /** 仮想描画ON/OFF */
   virtualRendering: boolean;
@@ -107,6 +113,9 @@ export const DEFAULT_SETTINGS: NovelsTimelineSettings = {
   relationArrowStyle: "arrow",
   relationOpacity: 0.6,
   relationCurveStrength: 50,
+
+  leftLaneTitle: "",
+  rightLaneTitle: "",
 
   virtualRendering: true,
   renderBuffer: 1500,

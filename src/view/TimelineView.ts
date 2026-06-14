@@ -118,6 +118,17 @@ export class TimelineView extends ItemView {
     // スクロール → 再描画（仮想描画更新 + ルーラー位置更新）
     this.timelineEl.addEventListener("scroll", () => this.scheduleRender());
 
+    // ダブルクリック → 関係線の選択を解除して再描画
+    this.timelineEl.addEventListener("dblclick", (e: MouseEvent) => {
+      // ノード上のダブルクリックは除外（SVGCircleElement）
+      const target = e.target as Element;
+      if (target && target.tagName === "circle") return;
+      if (this.selectedId !== null) {
+        this.selectedId = null;
+        this.scheduleRender();
+      }
+    });
+
     // Ctrl+ホイール → 左右スクロール
     this.timelineEl.addEventListener("wheel", (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -458,6 +469,8 @@ export class TimelineView extends ItemView {
       onGapClick:    (gap) => this.handleGapClick(gap),
       onContextMenu: (svgY, mx, my) => this.handleContextMenu(svgY, mx, my),
       onLaneDrop:    (eventId, laneShift) => this.handleLaneDrop(eventId, laneShift),
+      leftLaneTitle:  this.plugin.settings.leftLaneTitle ?? "",
+      rightLaneTitle: this.plugin.settings.rightLaneTitle ?? "",
     });
 
     const t1 = performance.now();
@@ -552,16 +565,25 @@ export class TimelineView extends ItemView {
     menu.showAtPosition({ x: mouseX, y: mouseY });
   }
 
-  private async handleLaneDrop(eventId: string, laneShift: number): Promise<void> {
+  private async handleLaneDrop(eventId: string, targetLane: number): Promise<void> {
     const event = this.eventStore.getById(eventId);
     if (!event) return;
 
-    const newLane = Math.max(LANE_MIN, Math.min(LANE_MAX, event.lane + laneShift));
+    // lane=0（時間軸）をまたぐ場合は移動方向に応じて +1 か -1 へスキップ
+    let newLane = targetLane;
+    if (newLane === 0) newLane = targetLane >= event.lane ? 1 : -1;
+
+    // ±10 の範囲にクランプ
+    newLane = Math.max(LANE_MIN, Math.min(LANE_MAX, newLane));
+
+    // 変化なしなら何もしない
     if (newLane === event.lane) return;
 
+    // EventStore を更新
     const updated = { ...event, lane: newLane };
     this.eventStore.upsert(updated);
 
+    // Markdown に書き込む
     const file = this.plugin.app.vault.getFileByPath(event.filePath);
     if (file) {
       try {

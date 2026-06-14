@@ -202,6 +202,34 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
           })
       );
 
+    new Setting(containerEl)
+      .setName("左レーンタイトル")
+      .setDesc("レーン -1〜-10 の上部に表示するタイトル（任意）。例：表サイド")
+      .addText((text) =>
+        text
+          .setPlaceholder("例: 表サイド")
+          .setValue(this.plugin.settings.leftLaneTitle)
+          .onChange(async (value) => {
+            this.plugin.settings.leftLaneTitle = value;
+            await this.plugin.saveSettings();
+            this.plugin.notifySettingsChanged();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("右レーンタイトル")
+      .setDesc("レーン 1〜10 の上部に表示するタイトル（任意）。例：裏サイド")
+      .addText((text) =>
+        text
+          .setPlaceholder("例: 裏サイド")
+          .setValue(this.plugin.settings.rightLaneTitle)
+          .onChange(async (value) => {
+            this.plugin.settings.rightLaneTitle = value;
+            await this.plugin.saveSettings();
+            this.plugin.notifySettingsChanged();
+          })
+      );
+
     // ========================================================
     // Calendar（C. 暦設定）
     // ========================================================

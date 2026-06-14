@@ -562,6 +562,13 @@ export class EventSidebarView extends ItemView {
   // timelineブロック書き換え
   // ----------------------------------------------------------
 
+  /**
+   * ブロック本文を毎回完全に組み直す。
+   * フィールド順序は仕様通り固定：
+   *   1.date  2.lane  3.size  4.color
+   *   5.characters  6.locations  7.summary  8.links
+   * キーの有無・元の順序に関わらず常に同じレイアウトで書き出す。
+   */
   private rewriteBlock(content: string, fields: {
     date: string; lane: number; size: string; color: string;
     characters: string[]; locations: string[]; summary: string | undefined;
@@ -569,55 +576,52 @@ export class EventSidebarView extends ItemView {
   }): string {
     return content.replace(
       /(^`{3,}novels_timeline_jp\s*$)([\s\S]*?)(^`{3,}\s*$)/m,
-      (_match, open, body, close) => {
-        let b = body;
-        b = b.replace(/^(date\s*:\s*).*$/m,    `$1${fields.date}`);
-        b = b.replace(/^(lane\s*:\s*).*$/m,    `$1${fields.lane}`);
-        b = b.replace(/^(size\s*:\s*).*$/m,    `$1${fields.size}`);
-        b = b.replace(/^(color\s*:\s*).*$/m,   `$1"${fields.color}"`);
-        b = b.replace(/^(summary\s*:\s*).*$/m, `$1${fields.summary ?? ""}`);
-        b = this.rewriteListField(b, "characters", fields.characters);
-        b = this.rewriteListField(b, "locations",  fields.locations);
-        b = this.rewriteLinksField(b, fields.links);
-        return open + b + close;
+      (_match, open, _body, close) => {
+        const lines: string[] = [];
+
+        // 1. date
+        lines.push(`date: ${fields.date}`);
+        lines.push("");
+        // 2. lane
+        lines.push(`lane: ${fields.lane}`);
+        lines.push("");
+        // 3. size
+        lines.push(`size: ${fields.size}`);
+        lines.push("");
+        // 4. color
+        lines.push(`color: "${fields.color}"`);
+        lines.push("");
+        // 5. characters
+        if (fields.characters.length > 0) {
+          lines.push("characters:");
+          for (const c of fields.characters) lines.push(`  - ${c}`);
+        } else {
+          lines.push("characters:");
+        }
+        lines.push("");
+        // 6. locations
+        if (fields.locations.length > 0) {
+          lines.push("locations:");
+          for (const l of fields.locations) lines.push(`  - ${l}`);
+        } else {
+          lines.push("locations:");
+        }
+        lines.push("");
+        // 7. summary
+        lines.push(`summary: ${fields.summary ?? ""}`);
+        lines.push("");
+        // 8. links
+        if (fields.links.length > 0) {
+          lines.push("links:");
+          for (const l of fields.links) lines.push(`  - "[[${l}]]"`);
+        } else {
+          lines.push("links:");
+        }
+        lines.push("");
+
+        return open + "\n" + lines.join("\n") + close;
       }
     );
-  }
-
-  private rewriteListField(body: string, key: string, values: string[]): string {
-    const lines    = body.split("\n");
-    const newLines: string[] = [];
-    let i = 0;
-    while (i < lines.length) {
-      if (new RegExp(`^${key}\\s*:`).test(lines[i])) {
-        newLines.push(values.length
-          ? `${key}:\n` + values.map(v => `  - ${v}`).join("\n")
-          : `${key}:`);
-        i++;
-        while (i < lines.length && /^\s+-/.test(lines[i])) i++;
-      } else {
-        newLines.push(lines[i++]);
-      }
-    }
-    return newLines.join("\n");
-  }
-
-  private rewriteLinksField(body: string, links: string[]): string {
-    const lines    = body.split("\n");
-    const newLines: string[] = [];
-    let i = 0;
-    while (i < lines.length) {
-      if (/^links\s*:/.test(lines[i])) {
-        newLines.push(links.length
-          ? "links:\n" + links.map(l => `  - "[[${l}]]"`).join("\n")
-          : "links:");
-        i++;
-        while (i < lines.length && /^\s+-/.test(lines[i])) i++;
-      } else {
-        newLines.push(lines[i++]);
-      }
-    }
-    return newLines.join("\n");
   }
 
   // ----------------------------------------------------------
