@@ -1,0 +1,52 @@
+name: Build and Release Plugin
+
+# 手動で実行ボタンを押した時のみ作動する設定
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'リリースするバージョン（例: 1.0.0）'
+        required: true
+        type: string
+
+# 証明書発行およびリリース作成に必要な権限
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: コードの取得
+        uses: actions/checkout@v4
+
+      - name: Node.jsのセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 依存パッケージのインストール
+        run: npm install
+
+      - name: プラグインのビルド実行
+        run: npm run build
+
+      - name: アーティファクト証明の生成
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
+
+      - name: GitHubリリースの作成とファイルのアップロード
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: Release ${{ github.event.inputs.version }}
+          files: |
+            main.js
+            manifest.json
+            styles.css

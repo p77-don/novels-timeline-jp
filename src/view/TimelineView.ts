@@ -19,6 +19,7 @@ import { RelationEngine }   from "../engine/RelationEngine";
 import { GapEngine }        from "../engine/GapEngine";
 import { FilterEngine }     from "../engine/FilterEngine";
 import { TimelineRenderer, DateRow } from "./TimelineRenderer";
+import { TableView } from "./TableView";
 import { DateParser } from "../parser/DateParser";
 import { getMonthDef } from "../settings/PluginSettings";
 
@@ -61,8 +62,13 @@ export class TimelineView extends ItemView {
 
   private toolbarEl!:    HTMLElement;
   private timelineEl!:   HTMLElement;
+  private tableContainerEl!: HTMLElement;
   private searchInput!:  HTMLInputElement;
   private debugOverlay!: HTMLElement;
+  private viewModeBtn!:  HTMLElement;
+
+  private viewMode: "timeline" | "table" = "timeline";
+  private tableView!: TableView;
 
   // タイマーID
   private renderTimer:    ReturnType<typeof setTimeout> | null = null;
@@ -111,6 +117,10 @@ export class TimelineView extends ItemView {
 
     this.timelineEl = root.createDiv({ cls: "ntj-timeline" });
     this.renderer   = new TimelineRenderer(this.timelineEl);
+
+    this.tableContainerEl = root.createDiv({ cls: "ntj-table-container" });
+    this.tableContainerEl.style.display = "none";
+    this.tableView = new TableView(this.tableContainerEl);
 
     this.debugOverlay = this.timelineEl.createDiv({ cls: "ntj-debug-overlay" });
     this.debugOverlay.style.display = "none";
@@ -228,6 +238,15 @@ export class TimelineView extends ItemView {
       relationBtn.textContent = modeLabels[next];
       this.plugin.saveSettings();
       this.scheduleRender();
+    });
+
+    // ─── テーブル/タイムライン切替ボタン ───
+    this.viewModeBtn = this.toolbarEl.createEl("button", {
+      cls:  "ntj-btn ntj-view-mode-btn",
+      text: "一覧表示",
+    });
+    this.viewModeBtn.addEventListener("click", () => {
+      this.toggleViewMode();
     });
   }
 
@@ -473,6 +492,13 @@ export class TimelineView extends ItemView {
       rightLaneTitle: this.plugin.settings.rightLaneTitle ?? "",
     });
 
+    // テーブルビューも最新データで更新（表示中かどうかに関わらず）
+    const tableEvents = filtered.length < validEvents.length ? filtered : validEvents;
+    this.tableView.render(tableEvents, (filePath) => {
+      const file = this.plugin.app.vault.getFileByPath(filePath);
+      if (file) this.plugin.app.workspace.getLeaf(false).openFile(file);
+    });
+
     const t1 = performance.now();
     this.updateDebugOverlay(validEvents.length, this.nodes.length, this.gaps.length, t1 - t0);
   }
@@ -499,6 +525,26 @@ export class TimelineView extends ItemView {
       `scroll:  ${this.timelineEl.scrollTop.toFixed(0)}px`,
       `scale:   ${this.plugin.settings.nodeScale}%`,
     ].join("<br>");
+  }
+
+  // ----------------------------------------------------------
+  // ビューモード切替（タイムライン ↔ テーブル）
+  // ----------------------------------------------------------
+
+  private toggleViewMode(): void {
+    if (this.viewMode === "timeline") {
+      this.viewMode = "table";
+      this.timelineEl.style.display       = "none";
+      this.tableContainerEl.style.display = "flex";
+      this.viewModeBtn.textContent        = "タイムライン表示";
+      this.viewModeBtn.addClass("is-active");
+    } else {
+      this.viewMode = "timeline";
+      this.timelineEl.style.display       = "";
+      this.tableContainerEl.style.display = "none";
+      this.viewModeBtn.textContent        = "一覧表示";
+      this.viewModeBtn.removeClass("is-active");
+    }
   }
 
   // ----------------------------------------------------------

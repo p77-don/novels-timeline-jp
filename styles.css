@@ -853,3 +853,120 @@
   padding: 6px 8px 2px;
   margin-top: 4px;
 }
+
+/* ------------------------------------------------------------
+   テーブルビュー
+   ------------------------------------------------------------ */
+
+.ntj-table-container {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--background-primary);
+}
+
+.ntj-table-wrapper {
+  width: 100%;
+}
+
+.ntj-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  color: var(--text-normal);
+}
+
+.ntj-th {
+  position: sticky;
+  top: 0;
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 12px;
+  background-color: var(--background-secondary);
+  border-bottom: 2px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.ntj-tr {
+  border-bottom: 1px solid var(--background-modifier-border);
+  transition: background-color 0.1s;
+}
+
+.ntj-tr:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.ntj-td {
+  padding: 8px 12px;
+  vertical-align: top;
+  line-height: 1.5;
+}
+
+.ntj-td-title {
+  font-weight: 500;
+  white-space: nowrap;
+  min-width: 120px;
+}
+
+.ntj-td-date {
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 12px;
+  min-width: 100px;
+}
+
+.ntj-td-chars,
+.ntj-td-locs,
+.ntj-td-links {
+  min-width: 80px;
+}
+
+.ntj-td-summary {
+  min-width: 160px;
+  max-width: 320px;
+  color: var(--text-normal);
+}
+
+.ntj-table-link {
+  cursor: pointer;
+  color: var(--text-accent);
+  text-decoration: none;
+}
+
+.ntj-table-link:hover {
+  text-decoration: underline;
+}
+
+.ntj-table-tag {
+  display: inline-block;
+  padding: 1px 7px;
+  margin: 2px 2px 2px 0;
+  border-radius: 10px;
+  font-size: 11px;
+  background-color: var(--background-secondary-alt);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.ntj-table-link-tag {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-accent);
+}
+
+.ntj-table-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 14px;
+}
+
+/* 一覧表示ボタンのアクティブ状態 */
+.ntj-view-mode-btn.is-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}

@@ -5790,6 +5790,77 @@ var TimelineRenderer = class {
   }
 };
 
+// src/view/TableView.ts
+var TableView = class {
+  constructor(containerEl) {
+    this.containerEl = containerEl;
+  }
+  /** テーブルを描画する */
+  render(events, onOpenFile) {
+    this.containerEl.empty();
+    if (events.length === 0) {
+      const empty = this.containerEl.createDiv({ cls: "ntj-table-empty" });
+      empty.textContent = "\u30A4\u30D9\u30F3\u30C8\u304C\u3042\u308A\u307E\u305B\u3093";
+      return;
+    }
+    const wrapper = this.containerEl.createDiv({ cls: "ntj-table-wrapper" });
+    const table = wrapper.createEl("table", { cls: "ntj-table" });
+    const thead = table.createEl("thead");
+    const hrow = thead.createEl("tr");
+    const headers = ["\u30BF\u30A4\u30C8\u30EB", "\u65E5\u4ED8", "\u767B\u5834\u4EBA\u7269", "\u5834\u6240", "\u6982\u8981", "\u95A2\u9023\u30A4\u30D9\u30F3\u30C8"];
+    for (const h of headers) {
+      hrow.createEl("th", { text: h, cls: "ntj-th" });
+    }
+    const tbody = table.createEl("tbody");
+    for (const event of events) {
+      const row = tbody.createEl("tr", { cls: "ntj-tr" });
+      const titleTd = row.createEl("td", { cls: "ntj-td ntj-td-title" });
+      const titleLink = titleTd.createEl("span", {
+        cls: "ntj-table-link",
+        text: event.displayTitle
+      });
+      titleLink.addEventListener("click", () => onOpenFile(event.filePath));
+      row.createEl("td", {
+        cls: "ntj-td ntj-td-date",
+        text: event.date || "\u2014"
+      });
+      const charTd = row.createEl("td", { cls: "ntj-td ntj-td-chars" });
+      if (event.characters && event.characters.length > 0) {
+        for (const c of event.characters) {
+          charTd.createEl("span", { cls: "ntj-table-tag", text: c });
+        }
+      } else {
+        charTd.textContent = "\u2014";
+      }
+      const locTd = row.createEl("td", { cls: "ntj-td ntj-td-locs" });
+      if (event.locations && event.locations.length > 0) {
+        for (const l of event.locations) {
+          locTd.createEl("span", { cls: "ntj-table-tag", text: l });
+        }
+      } else {
+        locTd.textContent = "\u2014";
+      }
+      row.createEl("td", {
+        cls: "ntj-td ntj-td-summary",
+        text: event.summary || "\u2014"
+      });
+      const linkTd = row.createEl("td", { cls: "ntj-td ntj-td-links" });
+      if (event.links && event.links.length > 0) {
+        for (const link of event.links) {
+          const label = link.replace(/^\[\[/, "").replace(/\]\]$/, "");
+          linkTd.createEl("span", { cls: "ntj-table-tag ntj-table-link-tag", text: label });
+        }
+      } else {
+        linkTd.textContent = "\u2014";
+      }
+    }
+    this.tableEl = wrapper;
+  }
+  destroy() {
+    this.containerEl.empty();
+  }
+};
+
 // src/view/TimelineView.ts
 var TIMELINE_VIEW_TYPE = "novels-timeline-jp";
 var LANE_MIN = -10;
@@ -5805,6 +5876,7 @@ var TimelineView = class extends import_obsidian.ItemView {
       locations: /* @__PURE__ */ new Set(),
       searchQuery: ""
     };
+    this.viewMode = "timeline";
     // タイマーID
     this.renderTimer = null;
     // ドラッグパン状態
@@ -5849,6 +5921,9 @@ var TimelineView = class extends import_obsidian.ItemView {
     this.buildToolbar();
     this.timelineEl = root.createDiv({ cls: "ntj-timeline" });
     this.renderer = new TimelineRenderer(this.timelineEl);
+    this.tableContainerEl = root.createDiv({ cls: "ntj-table-container" });
+    this.tableContainerEl.style.display = "none";
+    this.tableView = new TableView(this.tableContainerEl);
     this.debugOverlay = this.timelineEl.createDiv({ cls: "ntj-debug-overlay" });
     this.debugOverlay.style.display = "none";
     this.timelineEl.addEventListener("scroll", () => this.scheduleRender());
@@ -5939,6 +6014,13 @@ var TimelineView = class extends import_obsidian.ItemView {
       relationBtn.textContent = modeLabels[next];
       this.plugin.saveSettings();
       this.scheduleRender();
+    });
+    this.viewModeBtn = this.toolbarEl.createEl("button", {
+      cls: "ntj-btn ntj-view-mode-btn",
+      text: "\u4E00\u89A7\u8868\u793A"
+    });
+    this.viewModeBtn.addEventListener("click", () => {
+      this.toggleViewMode();
     });
   }
   /**
@@ -6144,6 +6226,11 @@ var TimelineView = class extends import_obsidian.ItemView {
       leftLaneTitle: (_a = this.plugin.settings.leftLaneTitle) != null ? _a : "",
       rightLaneTitle: (_b = this.plugin.settings.rightLaneTitle) != null ? _b : ""
     });
+    const tableEvents = filtered.length < validEvents.length ? filtered : validEvents;
+    this.tableView.render(tableEvents, (filePath) => {
+      const file = this.plugin.app.vault.getFileByPath(filePath);
+      if (file) this.plugin.app.workspace.getLeaf(false).openFile(file);
+    });
     const t1 = performance.now();
     this.updateDebugOverlay(validEvents.length, this.nodes.length, this.gaps.length, t1 - t0);
   }
@@ -6162,6 +6249,24 @@ var TimelineView = class extends import_obsidian.ItemView {
       `scroll:  ${this.timelineEl.scrollTop.toFixed(0)}px`,
       `scale:   ${this.plugin.settings.nodeScale}%`
     ].join("<br>");
+  }
+  // ----------------------------------------------------------
+  // ビューモード切替（タイムライン ↔ テーブル）
+  // ----------------------------------------------------------
+  toggleViewMode() {
+    if (this.viewMode === "timeline") {
+      this.viewMode = "table";
+      this.timelineEl.style.display = "none";
+      this.tableContainerEl.style.display = "flex";
+      this.viewModeBtn.textContent = "\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u8868\u793A";
+      this.viewModeBtn.addClass("is-active");
+    } else {
+      this.viewMode = "timeline";
+      this.timelineEl.style.display = "";
+      this.tableContainerEl.style.display = "none";
+      this.viewModeBtn.textContent = "\u4E00\u89A7\u8868\u793A";
+      this.viewModeBtn.removeClass("is-active");
+    }
   }
   // ----------------------------------------------------------
   // インタラクション
