@@ -1,52 +1,62 @@
-name: Build and Release Plugin
+name: Release Obsidian plugin
 
-# 手動で実行ボタンを押した時のみ作動する設定
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'リリースするバージョン（例: 1.0.0）'
-        required: true
-        type: string
-
-# 証明書発行およびリリース作成に必要な権限
-permissions:
-  contents: write
-  id-token: write
-  attestations: write
+    push:
+        tags:
+            - '*'
+    # ↓ここから数行、手動実行のための設定を追記
+    workflow_dispatch:
+        inputs:
+            version:
+                description: 'リリースするバージョン（例: 1.0.0）'
+                required: true
+                type: string
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: コードの取得
-        uses: actions/checkout@v4
+    build:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+            id-token: write
+            attestations: write
+        steps:
+            - uses: actions/checkout@v6
 
-      - name: Node.jsのセットアップ
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+            - name: Use Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: 'npm'
 
-      - name: 依存パッケージのインストール
-        run: npm install
+            - name: Build plugin
+              run: |
+                  npm ci
+                  npm run build
 
-      - name: プラグインのビルド実行
-        run: npm run build
+            - name: Check for optional styles
+              id: styles
+              run: |
+                  [ -f styles.css ] && echo "exists=true" >> "$GITHUB_OUTPUT" || echo "exists=false" >> "$GITHUB_OUTPUT"
 
-      - name: アーティファクト証明の生成
-        uses: actions/attest@v4
-        with:
-          subject-path: |
-            main.js
-            manifest.json
-            styles.css
+            - name: Attest build provenance
+              uses: actions/attest@v4
+              with:
+                  subject-path: |
+                      main.js
+                      ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
 
-      - name: GitHubリリースの作成とファイルのアップロード
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.inputs.version }}
-          name: Release ${{ github.event.inputs.version }}
-          files: |
-            main.js
-            manifest.json
-            styles.css
+            - name: Create release
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              # ↓手動実行時に入力したバージョン番号を読み込めるよう、スクリプトを少し変更
+              run: |
+                  if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+                      tag="${{ github.event.inputs.version }}"
+                  else
+                      tag="${GITHUB_REF#refs/tags/}"
+                  fi
+
+                  gh release create "$tag" \
+                    --title="$tag" \
+                    --draft \
+                    main.js manifest.json ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
