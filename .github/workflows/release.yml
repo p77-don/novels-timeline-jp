@@ -4,11 +4,10 @@ on:
     push:
         tags:
             - '*'
-    # ↓ここから数行、手動実行のための設定を追記
     workflow_dispatch:
         inputs:
             version:
-                description: 'リリースするバージョン（例: 1.0.0）'
+                description: 'リリースするバージョン（例: 1.0.0。vは含めずに入力してください）'
                 required: true
                 type: string
 
@@ -48,15 +47,18 @@ jobs:
             - name: Create release
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              # ↓手動実行時に入力したバージョン番号を読み込めるよう、スクリプトを少し変更
               run: |
                   if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+                      # 先頭にvが含まれて入力された場合の対策として、vを削除してから変数に格納
                       tag="${{ github.event.inputs.version }}"
+                      tag="${tag#v}"
                   else
                       tag="${GITHUB_REF#refs/tags/}"
+                      tag="${tag#v}"
                   fi
 
+                  # titleにのみ「v」を付与してリリースを作成
                   gh release create "$tag" \
-                    --title="$tag" \
+                    --title="v$tag" \
                     --draft \
                     main.js manifest.json ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
