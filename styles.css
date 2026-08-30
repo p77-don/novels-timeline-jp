@@ -93,7 +93,9 @@
   transition: opacity 0.15s ease;
 }
 
-.ntj-node:hover circle {
+.ntj-node:hover rect,
+.ntj-node:hover ellipse,
+.ntj-node:hover polygon {
   filter: brightness(1.2);
 }
 

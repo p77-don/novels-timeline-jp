@@ -14,7 +14,7 @@ import {
 import { EventStore }       from "../store/EventStore";
 import { CacheStore }       from "../store/CacheStore";
 import { DiscoveryEngine }  from "../engine/DiscoveryEngine";
-import { LayoutEngine }     from "../engine/LayoutEngine";
+import { LayoutEngine, LANE_MIN, LANE_MAX, LANES_START_Y } from "../engine/LayoutEngine";
 import { RelationEngine }   from "../engine/RelationEngine";
 import { GapEngine }        from "../engine/GapEngine";
 import { FilterEngine }     from "../engine/FilterEngine";
@@ -34,9 +34,6 @@ import {
 import type NovelsTimelinePlugin from "../main";
 
 export const TIMELINE_VIEW_TYPE = "novels-timeline-jp";
-
-const LANE_MIN = -10;
-const LANE_MAX =  10;
 
 export class TimelineView extends ItemView {
   private plugin: NovelsTimelinePlugin;
@@ -344,17 +341,10 @@ export class TimelineView extends ItemView {
     this.filterEngine.buildIndex(this.eventStore.getAll());
     this.scheduleRender();
 
-    // 初期表示：横スクロールを中央（時間軸が画面中心）に合わせる
-    // SVG幅: 40*10*2 + 40*3 = 920, centerX = 460
-    // timelineElの幅の半分だけ左にスクロールして中央に位置合わせ
+    // 初期表示：左上（最も過去の日付・レーン1）を起点に表示する
     requestAnimationFrame(() => {
-      const LANE_W   = 40;
-      const AXIS_W   = LANE_W * 2;
-      const LANES    = 10;
-      const svgWidth = LANE_W * LANES + AXIS_W + LANE_W * LANES;
-      const centerX  = LANE_W * LANES + AXIS_W / 2;
-      const viewW    = this.timelineEl.clientWidth;
-      this.timelineEl.scrollLeft = centerX - Math.floor(viewW / 2);
+      this.timelineEl.scrollLeft = 0;
+      this.timelineEl.scrollTop  = 0;
     });
   }
 
@@ -431,36 +421,26 @@ export class TimelineView extends ItemView {
       ? new Set(filtered.map((e) => e.id))
       : null;
 
-    // SVG幅・centerX（Rendererと同じ計算式）
-    const LANE_W   = 40;
-    const AXIS_W   = LANE_W * 2;
-    const LANES    = 10;
-    const svgWidth = LANE_W * LANES + AXIS_W + LANE_W * LANES; // 880px
-    const centerX  = LANE_W * LANES + AXIS_W / 2;              // 440px
-
-    // ── Gap・Y座標の正しい計算順序 ──
-    // Step1: Gap情報なしで暫定Y座標を計算（Gap生成に使う）
-    const tempYMap = this.layoutEngine.calcYPositions(
+    // ── Gap・X座標の正しい計算順序（時間軸は横軸）──
+    // Step1: Gap情報なしで暫定X座標を計算（Gap生成に使う）
+    const tempXMap = this.layoutEngine.calcXPositions(
       validEvents, [], settings.gapCompression
     );
-    // Step2: 暫定Y座標でGap一覧を生成（expanded状態を保持）
+    // Step2: 暫定X座標でGap一覧を生成（expanded状態を保持）
     this.gaps = settings.gapCompression
-      ? this.gapEngine.buildGaps(validEvents, tempYMap, settings.gapThreshold)
+      ? this.gapEngine.buildGaps(validEvents, tempXMap, settings.gapThreshold)
       : [];
-    // Step3: Gap考慮済みの正式Y座標を再計算
-    const finalYMap = this.layoutEngine.calcYPositions(
-      validEvents, this.gaps, settings.gapCompression
-    );
-    // Step4: GapのY座標を正式Y（前後イベントの中間）で更新
-    this.gapEngine.updateGapYPositions(this.gaps, finalYMap, validEvents);
 
-    // Step5: ノード配置（validEventsのみ・正式GapでY計算）
+    // Step3: ノード配置（確定した gaps を使って正式X座標を計算する）
     this.nodes = this.layoutEngine.buildLayout(
-      validEvents, centerX, settings.nodeScale / 100,
+      validEvents, LANES_START_Y, settings.nodeScale / 100,
       this.gaps, settings.gapCompression
     );
 
-    const totalHeight = this.layoutEngine.calcTotalHeight(this.nodes);
+    // Step4: 確定した LayoutNode（実際の描画幅を含む）でGapの表示位置を更新する
+    this.gapEngine.updateGapYPositions(this.gaps, this.nodes);
+
+    const totalWidth = this.layoutEngine.calcTotalWidth(this.nodes);
     const edges       = this.relationEngine.buildEdges(validEvents, this.nodes);
 
     const virtualWindow: VirtualWindow = {
@@ -478,18 +458,15 @@ export class TimelineView extends ItemView {
       filteredIds,
       selectedId:   this.selectedId,
       settings,
-      centerX,
-      totalHeight,
+      totalWidth,
       virtualWindow,
       dateRows:     this.buildDateRows(validEvents, this.nodes),
       onNodeClick:   (event, _node, mx, my) => { void this.handleNodeClick(event, mx, my); },
       onNodeHover:   () => { /* Tooltip は Renderer 内で処理済み */ },
       onNodeLeave:   () => { /* Tooltip hide は Renderer 内で処理済み */ },
       onGapClick:    (gap) => this.handleGapClick(gap),
-      onContextMenu: (svgY, mx, my) => this.handleContextMenu(svgY, mx, my),
-      onLaneDrop:    (eventId, laneShift) => this.handleLaneDrop(eventId, laneShift),
-      leftLaneTitle:  this.plugin.settings.leftLaneTitle ?? "",
-      rightLaneTitle: this.plugin.settings.rightLaneTitle ?? "",
+      onContextMenu: (svgX, mx, my) => this.handleContextMenu(svgX, mx, my),
+      onLaneDrop:    (eventId, targetLane) => this.handleLaneDrop(eventId, targetLane),
     });
 
     // テーブルビューも最新データで更新（表示中かどうかに関わらず）
@@ -564,13 +541,13 @@ export class TimelineView extends ItemView {
     this.scheduleRender();
   }
 
-  private handleContextMenu(svgY: number, mouseX: number, mouseY: number): void {
+  private handleContextMenu(svgX: number, mouseX: number, mouseY: number): void {
     const settings  = this.plugin.settings;
 
-    // e.offsetY（SVGユーザー座標）をそのまま渡す。
-    // node.y も同じSVGユーザー座標なので変換不要。
-    const dateStr = this.layoutEngine.orderFromViewportY(
-      svgY, this.nodes, this.gaps, settings.gapCompression, ""
+    // e.offsetX（SVGユーザー座標）をそのまま渡す。
+    // node.x も同じSVGユーザー座標なので変換不要。
+    const dateStr = this.layoutEngine.orderFromViewportX(
+      svgX, this.nodes, this.gaps, settings.gapCompression, ""
     );
 
     const menu = new Menu();
@@ -615,12 +592,8 @@ export class TimelineView extends ItemView {
     const event = this.eventStore.getById(eventId);
     if (!event) return;
 
-    // lane=0（時間軸）をまたぐ場合は移動方向に応じて +1 か -1 へスキップ
-    let newLane = targetLane;
-    if (newLane === 0) newLane = targetLane >= event.lane ? 1 : -1;
-
-    // ±10 の範囲にクランプ
-    newLane = Math.max(LANE_MIN, Math.min(LANE_MAX, newLane));
+    // 1〜10 の範囲にクランプ
+    const newLane = Math.max(LANE_MIN, Math.min(LANE_MAX, targetLane));
 
     // 変化なしなら何もしない
     if (newLane === event.lane) return;
@@ -681,9 +654,9 @@ export class TimelineView extends ItemView {
     if (sortedEvents.length === 0) return [];
 
     const dateParser  = new DateParser(this.plugin.settings.calendar);
-    const nodeYMap    = new Map<string, number>();
+    const nodeXMap    = new Map<string, number>();
     for (const node of nodes) {
-      nodeYMap.set(node.event.id, node.y);
+      nodeXMap.set(node.event.id, node.x);
     }
 
     // timelineOrder → { y, parsed } の重複排除マップ
@@ -703,14 +676,14 @@ export class TimelineView extends ItemView {
         ? monthDef.name
         : `${month}月`;
 
-      const y = nodeYMap.get(event.id) ?? 0;
+      const x = nodeXMap.get(event.id) ?? 0;
 
       seenOrders.set(event.timelineOrder, {
-        y, year, month, day, monthLabel, calendarPrefix,
+        x, year, month, day, monthLabel, calendarPrefix,
       });
     }
 
-    return Array.from(seenOrders.values()).sort((a, b) => a.y - b.y);
+    return Array.from(seenOrders.values()).sort((a, b) => a.x - b.x);
   }
 
   async rebuildAll(): Promise<void> {

@@ -124,9 +124,9 @@ export class EventSidebarView extends ItemView {
     });
 
     // レーン
-    this.addField(el, "レーン（-10〜-1 または 1〜10）", (w) => {
+    this.addField(el, "レーン（1〜10）", (w) => {
       const i = w.createEl("input", { type: "number", cls: "ntj-sf-input" });
-      i.id = "ntj-f-lane"; i.value = "1"; i.min = "-10"; i.max = "10";
+      i.id = "ntj-f-lane"; i.value = "1"; i.min = "1"; i.max = "10";
     });
 
     // サイズ
@@ -205,9 +205,9 @@ export class EventSidebarView extends ItemView {
     });
 
     // レーン
-    this.addField(el, "レーン（-10〜-1 または 1〜10）", (w) => {
+    this.addField(el, "レーン（1〜10）", (w) => {
       const i = w.createEl("input", { type: "number", cls: "ntj-sf-input" });
-      i.id = "ntj-e-lane"; i.value = String(event.lane); i.min = "-10"; i.max = "10";
+      i.id = "ntj-e-lane"; i.value = String(event.lane); i.min = "1"; i.max = "10";
     });
 
     // サイズ
@@ -467,8 +467,8 @@ export class EventSidebarView extends ItemView {
 
     // ── レーン ──
     const lane = parseInt(laneStr, 10);
-    if (isNaN(lane) || lane === 0 || lane < -10 || lane > 10) {
-      errors.push("レーンは -10〜-1 または 1〜10 の整数を入力してください。");
+    if (isNaN(lane) || lane < 1 || lane > 10) {
+      errors.push("レーンは 1〜10 の整数を入力してください。");
     }
 
     // ── カラー ──

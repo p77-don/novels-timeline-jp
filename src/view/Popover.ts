@@ -43,10 +43,12 @@ export class Popover {
 
   show(event: TimelineEvent, anchorX: number, anchorY: number): void {
     this.el.empty();
+    // イベント自身の色を上辺のアクセントとして使う
+    this.el.style.borderTop = `3px solid ${event.color || "var(--interactive-accent)"}`;
 
     // ─── ヘッダー（ドラッグハンドル） ───
     this.headerEl = this.el.createEl("div", { cls: "ntj-popover-title" });
-    this.headerEl.textContent = event.displayTitle;
+    this.headerEl.createSpan({ text: event.displayTitle });
     this.headerEl.style.cursor = "grab";
     this.headerEl.addEventListener("mousedown", (e) => {
       e.preventDefault();
@@ -60,21 +62,23 @@ export class Popover {
     this.el.createEl("hr", { cls: "ntj-popover-divider" });
 
     // ─── 内容 ───
-    this.addRow("日付", event.date || "不明");
+    this.addRow("📅", "日付", event.date || "不明");
 
     if (event.characters.length > 0) {
-      this.addSection("登場人物", event.characters);
+      this.addSection("👤", "登場人物", event.characters);
     }
     if (event.locations.length > 0) {
-      this.addSection("場所", event.locations);
+      this.addSection("📍", "場所", event.locations);
     }
     if (event.summary) {
-      this.addRow("概要", event.summary);
+      this.addRow("📝", "概要", event.summary);
     }
 
     if (event.links.length > 0) {
       const section = this.el.createEl("div", { cls: "ntj-popover-section" });
-      section.createEl("div", { cls: "ntj-popover-label", text: "関連イベント" });
+      const label = section.createEl("div", { cls: "ntj-popover-label" });
+      label.createSpan({ cls: "ntj-popover-icon", text: "🔗" });
+      label.createSpan({ text: "関連イベント" });
       for (const linkId of event.links) {
         const link = section.createEl("div", { cls: "ntj-popover-link", text: linkId });
         link.addEventListener("click", (e) => {
@@ -156,15 +160,20 @@ export class Popover {
 
   // ─── ヘルパー ───
 
-  private addRow(label: string, value: string): void {
+  private addRow(icon: string, label: string, value: string): void {
     const row = this.el.createEl("div", { cls: "ntj-popover-row" });
-    row.createSpan({ cls: "ntj-popover-label", text: label });
-    row.createSpan({ text: value });
+    const labelEl = row.createSpan({ cls: "ntj-popover-label" });
+    labelEl.createSpan({ cls: "ntj-popover-icon", text: icon });
+    labelEl.createSpan({ text: label });
+    const valueEl = row.createSpan({ text: value });
+    valueEl.style.whiteSpace = "pre-wrap";
   }
 
-  private addSection(label: string, items: string[]): void {
+  private addSection(icon: string, label: string, items: string[]): void {
     const section = this.el.createEl("div", { cls: "ntj-popover-section" });
-    section.createEl("div", { cls: "ntj-popover-label", text: label });
+    const labelEl = section.createEl("div", { cls: "ntj-popover-label" });
+    labelEl.createSpan({ cls: "ntj-popover-icon", text: icon });
+    labelEl.createSpan({ text: label });
     for (const item of items) {
       section.createEl("div", { cls: "ntj-popover-item", text: item });
     }

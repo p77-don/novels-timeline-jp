@@ -22,30 +22,33 @@ export class Tooltip {
 
   show(event: TimelineEvent, mouseX: number, mouseY: number): void {
     this.el.empty();
+    // イベント自身の色をアクセント帯として使い、
+    // 「どのノードの情報か」を視覚的にも繋げる
+    this.el.style.borderLeft = `3px solid ${event.color || "var(--interactive-accent)"}`;
 
     this.el.createEl("div", { cls: "ntj-tooltip-title", text: event.displayTitle });
 
     const dateRow = this.el.createEl("div", { cls: "ntj-tooltip-row" });
-    dateRow.createSpan({ cls: "ntj-tooltip-label", text: "日付" });
+    dateRow.createSpan({ cls: "ntj-tooltip-icon", text: "📅" });
     dateRow.createSpan({ text: event.date || "不明" });
 
     if (event.characters.length > 0) {
       const row = this.el.createEl("div", { cls: "ntj-tooltip-row" });
-      row.createSpan({ cls: "ntj-tooltip-label", text: "登場人物" });
+      row.createSpan({ cls: "ntj-tooltip-icon", text: "👤" });
       row.createSpan({ text: event.characters.length > 1
         ? `${event.characters[0]}…他` : event.characters[0] });
     }
 
     if (event.locations.length > 0) {
       const row = this.el.createEl("div", { cls: "ntj-tooltip-row" });
-      row.createSpan({ cls: "ntj-tooltip-label", text: "場所" });
+      row.createSpan({ cls: "ntj-tooltip-icon", text: "📍" });
       row.createSpan({ text: event.locations.length > 1
         ? `${event.locations[0]}…他` : event.locations[0] });
     }
 
     if (event.summary) {
-      const row = this.el.createEl("div", { cls: "ntj-tooltip-row" });
-      row.createSpan({ cls: "ntj-tooltip-label", text: "概要" });
+      const row = this.el.createEl("div", { cls: "ntj-tooltip-row ntj-tooltip-summary" });
+      row.createSpan({ cls: "ntj-tooltip-icon", text: "📝" });
       // _LineBreak_ を \n に戻し、white-space:pre-wrap で改行表示
       const summarySpan = row.createSpan({
         text: event.summary.replace(/_LineBreak_/g, "\n")

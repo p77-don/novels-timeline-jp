@@ -60,7 +60,7 @@ export interface TimelineEvent {
    */
   timelineOrder: number;
 
-  /** 時間軸からの相対配置番号（-10〜+10、0は時間軸） */
+  /** レーン番号（1〜10）。時間軸は横軸となり、レーンは縦方向の行として扱われる */
   lane: number;
 
   /** ノードサイズ */
@@ -132,7 +132,11 @@ export interface GapSegment {
   fromOrder: number;
   /** Gap直後のイベントのtimelineOrder */
   toOrder: number;
-  /** SVG上のY座標（Gap表示位置） */
+  /**
+   * 時間軸上のSVG座標（Gap表示位置）。
+   * 時間軸は横軸のため、実体は「SVG X座標」である
+   * （フィールド名 y は互換性のため維持）。
+   */
   y: number;
   /** 差分の表示文字列 例: "3年", "2か月", "5日" */
   label: string;

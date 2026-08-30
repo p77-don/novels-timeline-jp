@@ -208,7 +208,7 @@ export class TimelineParser {
       displayTitle,
       date,
       timelineOrder,
-      lane: this.parseIntField(raw["lane"], 0, -10, 10),
+      lane: this.parseIntField(raw["lane"], 1, 1, 10),
       size: this.parseSizeField(raw["size"]),
       color: this.parseColorField(raw["color"]),
       characters: this.parseStringArray(raw["characters"]),

@@ -126,13 +126,13 @@ export class SidePanel {
     });
 
     // ─ lane ─
-    this.addField(body, "レーン（-10〜10、0以外）", (wrapper) => {
+    this.addField(body, "レーン（1〜10）", (wrapper) => {
       const input = wrapper.createEl("input", {
         type: "number", cls: "ntj-sp-input",
       });
       input.id    = "ntj-f-lane";
       input.value = "1";
-      input.min   = "-10";
+      input.min   = "1";
       input.max   = "10";
     });
 
@@ -240,8 +240,8 @@ export class SidePanel {
     }
 
     const laneRaw = parseInt(laneInput?.value ?? "1", 10);
-    const lane    = isNaN(laneRaw) || laneRaw === 0 ? 1
-                  : Math.max(-10, Math.min(10, laneRaw));
+    const lane    = isNaN(laneRaw) ? 1
+                  : Math.max(1, Math.min(10, laneRaw));
 
     const data: NewEventFormData = {
       date,

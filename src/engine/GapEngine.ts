@@ -9,15 +9,18 @@
 // ============================================================
 
 import { TimelineEvent } from "../types/TimelineTypes";
-import { GapSegment } from "../types/TimelineTypes";
+import { GapSegment, LayoutNode } from "../types/TimelineTypes";
 import { CalendarSettings } from "../types/TimelineTypes";
 import { calcYearDays } from "../settings/PluginSettings";
+import { GAP_MIN_DAYS, estimateNodePillWidth } from "./LayoutEngine";
 
 /** Gap1件を構成するのに必要な最小情報 */
 interface GapInput {
   before: TimelineEvent;
   after: TimelineEvent;
+  /** 時間軸（横軸）上のSVG X座標 */
   yBefore: number;
+  /** 時間軸（横軸）上のSVG X座標 */
   yAfter: number;
 }
 
@@ -46,7 +49,7 @@ export class GapEngine {
    * ソート済みイベント一覧と各イベントのY座標から Gap を生成する
    *
    * @param sortedEvents  timelineOrder 昇順でソート済みのイベント
-   * @param yPositions    イベントID → SVG Y座標のマップ
+   * @param yPositions    イベントID → SVG X座標（時間軸位置）のマップ
    * @param threshold     Gap生成条件（日数相当値）
    */
   buildGaps(
@@ -55,6 +58,9 @@ export class GapEngine {
     threshold: number
   ): GapSegment[] {
     const gaps: GapSegment[] = [];
+    // GAP同士が密集して重なるのを防ぐため、設定値に関わらず
+    // 「GAP_MIN_DAYS日未満」は圧縮対象にしない（下限を強制する）
+    const effectiveThreshold = Math.max(GAP_MIN_DAYS, threshold);
 
     for (let i = 0; i < sortedEvents.length - 1; i++) {
       const before = sortedEvents[i];
@@ -63,7 +69,7 @@ export class GapEngine {
       // 両端を除いた実際の空き日数で threshold を比較する
       const gapDays = Math.max(0, diff - 1);
 
-      if (gapDays < threshold) continue;
+      if (gapDays < effectiveThreshold) continue;
 
       const yBefore = yPositions.get(before.id) ?? 0;
       const yAfter  = yPositions.get(after.id)  ?? 0;
@@ -75,40 +81,37 @@ export class GapEngine {
   }
 
   // ----------------------------------------------------------
-  // Gap の Y 座標を正式Y座標マップで更新する
+  // Gap の位置（時間軸X座標）をノードの実描画位置で更新する
   // ----------------------------------------------------------
 
   /**
-   * buildGaps() 後に calcYPositions(gap考慮済み) で再計算したY座標で
-   * 各 Gap の y（表示位置）を更新する。
+   * buildGaps() 後、LayoutEngine.buildLayout() で確定した LayoutNode 一覧を使って
+   * 各 Gap の表示位置（実体はX座標）を更新する。
    *
-   * Gap の y = 前後イベントのY座標の中間点
-   * これにより「折りたたみ時」と「展開時」で正しい位置に表示される。
+   * ノードは「左端(node.x)が時間軸の日付起点」となるよう描画されるため、
+   * Gapの中心は
+   *   前イベントノードの【右端】(x + 描画幅) 〜 後イベントノードの【左端】(x)
+   * の中間点として算出する。単純に両ノードの x（左端同士）の中間点を取ると、
+   * 前イベントノードの描画範囲にGapが重なって見えてしまうため注意する。
    */
-  updateGapYPositions(
-    gaps: GapSegment[],
-    finalYMap: Map<string, number>,
-    sortedEvents: TimelineEvent[]
-  ): void {
-    const orderToId = new Map<number, string>();
-    for (const event of sortedEvents) {
-      if (!orderToId.has(event.timelineOrder)) {
-        orderToId.set(event.timelineOrder, event.id);
+  updateGapYPositions(gaps: GapSegment[], nodes: LayoutNode[]): void {
+    const orderToNode = new Map<number, LayoutNode>();
+    for (const node of nodes) {
+      if (!orderToNode.has(node.event.timelineOrder)) {
+        orderToNode.set(node.event.timelineOrder, node);
       }
     }
 
     for (const gap of gaps) {
-      const fromId = orderToId.get(gap.fromOrder);
-      const toId   = orderToId.get(gap.toOrder);
-      if (fromId === undefined || toId === undefined) continue;
-      const yFrom = finalYMap.get(fromId);
-      const yTo   = finalYMap.get(toId);
-      if (yFrom !== undefined && yTo !== undefined) {
-        // Gap帯の中央（日付ラベルとの重なりを避けるため純粋な中間点ではなく
-        // 前イベントから一定の余白を取った位置に配置する）
-        const GAP_TOP_MARGIN = 30; // 前イベントの日付ラベル下端からの余白
-        gap.y = yFrom + GAP_TOP_MARGIN + (yTo - yFrom - GAP_TOP_MARGIN) / 2;
-      }
+      const fromNode = orderToNode.get(gap.fromOrder);
+      const toNode   = orderToNode.get(gap.toOrder);
+      if (!fromNode || !toNode) continue;
+
+      const fromRightEdge = fromNode.x + estimateNodePillWidth(fromNode.event, fromNode.radius);
+      const toLeftEdge    = toNode.x;
+
+      // Gapの表示位置は「前ノードの右端」〜「後ノードの左端」の中間点
+      gap.y = (fromRightEdge + toLeftEdge) / 2;
     }
   }
 

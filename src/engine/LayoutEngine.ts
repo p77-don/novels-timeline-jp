@@ -2,12 +2,14 @@
 // LayoutEngine.ts
 // Novels Timeline JP — 描画座標計算
 //
+// v2 レイアウト方針（横軸タイムライン）:
+//   時間軸は横方向（X）、レーンは縦方向（Y・1〜10の行）に変更。
+//
 // 設計ルール:
-//   1. 同日（同timelineOrder）のイベントは同じY座標に配置する
-//   2. lane=0 はイベント配置禁止（時間軸専用）
-//      → lane=0 のイベントは同日の空きlaneに自動割り当て
-//   3. 同X座標（同lane）かつ同Y座標の重なりのみ補正する
-//      → Y方向のオフセットではなく、laneを隣に移動する
+//   1. 同日（同timelineOrder）のイベントは同じX座標に配置する
+//   2. レーンは 1〜10 の固定行として扱う（時間軸専用の予約レーンはない）
+//   3. 同Y座標（同lane）かつ同X座標の重なりのみ補正する
+//      → X方向のオフセットではなく、laneを隣の行に移動する
 // ============================================================
 
 import { TimelineEvent } from "../types/TimelineTypes";
@@ -15,16 +17,68 @@ import { LayoutNode, GapSegment } from "../types/TimelineTypes";
 import { DateParser } from "../parser/DateParser";
 import { CalendarSettings } from "../types/TimelineTypes";
 
-const LANE_WIDTH            = 40;   // レーン幅(px)
-const BASE_RADIUS: Record<string, number> = {
-  small: 8, medium: 12, big: 18,
+export const LANE_MIN = 1;
+export const LANE_MAX = 10;
+export const LANE_COUNT = LANE_MAX - LANE_MIN + 1;
+
+/** レーン1行あたりの高さ(px) */
+export const ROW_HEIGHT = 50;
+/** 上部マージン(px) — 日付ルーラー分の余白（年・月表示、日は表示しない） */
+export const HEADER_HEIGHT = 64;
+/** 時間軸とイベントレーンの間に確保する「GAP専用レーン」の高さ(px) */
+export const GAP_ROW_HEIGHT = 40;
+/** イベントレーン（lane 1）が開始するSVG Y座標 */
+export const LANES_START_Y = HEADER_HEIGHT + GAP_ROW_HEIGHT;
+/** 左側固定列（レーン番号表示エリア）の幅(px) */
+export const LANE_LABEL_W = 56;
+
+/**
+ * サイズ倍率（小=1 を基準に、中=1.5倍、大=2倍）。
+ * ノードの幅・高さは共通してこの倍率で決まる。
+ */
+const SIZE_MULTIPLIER: Record<string, number> = {
+  small: 1, medium: 1.5, big: 2,
 };
-const TOP_MARGIN            = 110;  // 上部マージン(px) — ルーラー分の余白
-const MIN_Y_GAP             = 40;   // 隣接イベント間の最小Y間隔(px)
-const COMPRESSED_GAP_HEIGHT = 40;   // Gap圧縮時の固定高さ(px)
-const Y_SCALE               = 4.0;  // 通常描画時の timelineOrder差 → px (1日=4px)
-const EXPANDED_PX_PER_DAY   = 20;   // Gap展開時の1日あたり高さ(px)
-const EXPANDED_MIN_HEIGHT   = 120;  // Gap展開時の最小高さ(px) — 圧縮時より必ず大きくする
+/** 「小」サイズにおける基準半径(px)（等倍・nodeScale=1のとき） */
+const BASE_UNIT_HALF_HEIGHT = 8;
+/** タイムライン開始X座標(px) — 左固定列と重ならないよう余白を確保 */
+const START_X               = LANE_LABEL_W + 20;
+const MIN_X_GAP              = 46;   // 隣接イベント間の最小X間隔(px)
+const X_SCALE                = 4.0;  // 通常描画時の timelineOrder差 → px (1日=4px)
+/** Gapとして圧縮できる最小日数。これ未満は圧縮対象にしない（GAP同士の重なり防止） */
+export const GAP_MIN_DAYS    = 3;
+/** Gap圧縮時の幅(px) — 常に「3日分」に相当する幅で固定表示する */
+export const GAP_SLOT_WIDTH  = Math.max(MIN_X_GAP, GAP_MIN_DAYS * X_SCALE);
+export const EXPANDED_PX_PER_DAY    = 20;   // Gap展開時の1日あたり幅(px)
+export const EXPANDED_MIN_WIDTH     = 120;  // Gap展開時の最小幅(px) — 圧縮時より必ず大きくする
+/** 最初のイベントノードが時間軸の起点(0位置)に重ならないよう設ける先行日数 */
+const LEAD_DAYS_BEFORE_FIRST = 3;
+
+// ------------------------------------------------------------
+// ノード表示サイズの共通計算（Renderer・GapEngine 双方から参照する）
+//
+// ノードは「左端(node.x)が時間軸の日付起点」となるよう描画されるため、
+// Gapの表示位置（前後ノードの間の空白の中心）を正しく算出するには、
+// ノードの実際の描画幅を Renderer 以外からも参照できる必要がある。
+// ------------------------------------------------------------
+
+/** ノードに表示する日にちテキスト（例: "12日"） */
+export function dayLabelForEvent(event: TimelineEvent): string {
+  const match = /\/([0-9]+)$/.exec(event.date);
+  const day   = match ? match[1] : "?";
+  return `${day}日`;
+}
+
+export function estimateNodeFontSize(radius: number): number {
+  return Math.max(9, Math.min(22, radius * 1.15));
+}
+
+/** ノード（日にちバッジ）の描画幅(px)を見積もる */
+export function estimateNodePillWidth(event: TimelineEvent, radius: number): number {
+  const text     = dayLabelForEvent(event);
+  const fontSize = estimateNodeFontSize(radius);
+  return text.length * fontSize * 0.62 + fontSize * 0.9;
+}
 
 export class LayoutEngine {
   private dateParser: DateParser;
@@ -43,7 +97,7 @@ export class LayoutEngine {
 
   buildLayout(
     sortedEvents: TimelineEvent[],
-    centerX: number,
+    lanesStartY: number,
     nodeScale: number,
     gaps: GapSegment[],
     gapCompression: boolean
@@ -53,14 +107,14 @@ export class LayoutEngine {
     // ① 同日グループにまとめる
     const dayGroups = this.groupByDay(sortedEvents);
 
-    // ② Y座標を「日付ごとに1行」で算出
-    const yByOrder = this.calcYByDayGroup(dayGroups, gaps, gapCompression);
+    // ② X座標を「日付ごとに1列」で算出
+    const xByOrder = this.calcXByDayGroup(dayGroups, gaps, gapCompression);
 
-    // ③ 各グループ内でlane=0を解決し、X衝突を回避して LayoutNode を生成
+    // ③ 各グループ内でlane衝突を回避して LayoutNode を生成
     const nodes: LayoutNode[] = [];
     for (const group of dayGroups) {
-      const y = yByOrder.get(group.order) ?? 0;
-      this.resolveGroupLayout(group.events, y, centerX, nodeScale, nodes);
+      const x = xByOrder.get(group.order) ?? 0;
+      this.resolveGroupLayout(group.events, x, lanesStartY, nodeScale, nodes);
     }
 
     return nodes;
@@ -88,19 +142,22 @@ export class LayoutEngine {
   }
 
   // ----------------------------------------------------------
-  // ② 日付グループ単位でY座標を計算（1日 = 1行）
+  // ② 日付グループ単位でX座標を計算（1日 = 1列）
   // ----------------------------------------------------------
 
-  private calcYByDayGroup(
+  private calcXByDayGroup(
     groups: Array<{ order: number; events: TimelineEvent[] }>,
     gaps: GapSegment[],
     gapCompression: boolean
   ): Map<number, number> {
-    const yMap = new Map<number, number>();
-    if (groups.length === 0) return yMap;
+    const xMap = new Map<number, number>();
+    if (groups.length === 0) return xMap;
 
-    let currentY = TOP_MARGIN;
-    yMap.set(groups[0].order, currentY);
+    let currentX = START_X;
+    // 最初のイベントは時間軸の起点(0位置)に重ならないよう、
+    // 「先行日数(LEAD_DAYS_BEFORE_FIRST)分」の余白を空けてから配置する
+    currentX += Math.max(MIN_X_GAP, LEAD_DAYS_BEFORE_FIRST * X_SCALE);
+    xMap.set(groups[0].order, currentX);
 
     for (let i = 1; i < groups.length; i++) {
       const prev      = groups[i - 1];
@@ -112,163 +169,125 @@ export class LayoutEngine {
           (g) => g.fromOrder === prev.order && g.toOrder === cur.order
         );
         if (matchingGap) {
-          currentY += matchingGap.expanded
-            ? Math.max(EXPANDED_MIN_HEIGHT, orderDiff * EXPANDED_PX_PER_DAY)
-            : COMPRESSED_GAP_HEIGHT;
+          currentX += matchingGap.expanded
+            ? Math.max(EXPANDED_MIN_WIDTH, orderDiff * EXPANDED_PX_PER_DAY)
+            : GAP_SLOT_WIDTH;
         } else {
-          currentY += Math.max(MIN_Y_GAP, orderDiff * Y_SCALE);
+          currentX += Math.max(MIN_X_GAP, orderDiff * X_SCALE);
         }
       } else {
-        currentY += Math.max(MIN_Y_GAP, orderDiff * Y_SCALE);
+        currentX += Math.max(MIN_X_GAP, orderDiff * X_SCALE);
       }
 
-      yMap.set(cur.order, currentY);
+      xMap.set(cur.order, currentX);
     }
 
-    return yMap;
+    return xMap;
   }
 
   // ----------------------------------------------------------
   // ③ グループ内レイアウト
-  //    - lane=0 を自動的に空きlaneへ移動
-  //    - 同laneの衝突はlaneをずらして回避
+  //    - 同laneの衝突はlaneをずらして回避（1〜10の範囲内）
   // ----------------------------------------------------------
 
   private resolveGroupLayout(
     events: TimelineEvent[],
-    y: number,
-    centerX: number,
+    x: number,
+    lanesStartY: number,
     nodeScale: number,
     out: LayoutNode[]
   ): void {
     // このグループで使用済みのlane番号
     const usedLanes = new Set<number>();
-
-    // lane=0 以外を先に確定
     const resolved: Array<{ event: TimelineEvent; effectiveLane: number }> = [];
 
     for (const event of events) {
-      if (event.lane !== 0) {
-        let lane = event.lane;
-        // 同laneに既存ノードがある場合は最近傍の空きlaneへ
-        lane = this.findFreeLane(lane, usedLanes);
-        usedLanes.add(lane);
-        resolved.push({ event, effectiveLane: lane });
-      }
-    }
-
-    // lane=0 のイベントを後から処理（0に近い空きlaneを割り当て）
-    for (const event of events) {
-      if (event.lane === 0) {
-        const lane = this.findFreeLane(0, usedLanes);
-        usedLanes.add(lane);
-        resolved.push({ event, effectiveLane: lane });
-      }
+      const lane = this.findFreeLane(event.lane, usedLanes);
+      usedLanes.add(lane);
+      resolved.push({ event, effectiveLane: lane });
     }
 
     // LayoutNode を生成
     for (const { event, effectiveLane } of resolved) {
-      const x      = this.calcX(effectiveLane, centerX);
+      const y      = this.calcY(effectiveLane, lanesStartY);
       const radius = this.calcRadius(event.size, nodeScale);
       out.push({ event, x, y, radius });
     }
   }
 
   /**
-   * 指定laneから最も近い未使用laneを探す。
-   * startLane=0 の場合は 1 → -1 → 2 → -2 の順に探す（0は時間軸予約）。
+   * 指定laneから最も近い未使用laneを探す（1〜10の範囲のみ）。
+   * 範囲外に押し出された場合は、範囲内で最初に見つかった空きlaneを使う。
+   * 全レーンが埋まっている場合は指定laneをそのまま返す（重なりを許容）。
    */
   private findFreeLane(startLane: number, usedLanes: Set<number>): number {
-    if (startLane === 0) {
-      // lane=0 のイベント → 1, -1, 2, -2, 3, -3 ... の順で探す
-      for (let n = 1; n <= 20; n++) {
-        for (const candidate of [n, -n]) {
-          if (!usedLanes.has(candidate)) return candidate;
-        }
-      }
-      return 1; // フォールバック
-    }
+    const clampedStart = Math.max(LANE_MIN, Math.min(LANE_MAX, startLane));
 
-    // lane≠0 のイベント → 指定laneが空いていればそのまま使う
-    if (!usedLanes.has(startLane)) return startLane;
+    if (!usedLanes.has(clampedStart)) return clampedStart;
 
-    // 衝突時は指定laneから外側へ交互に探す（0は必ず飛ばす）
-    for (let delta = 1; delta <= 20; delta++) {
-      for (const candidate of [startLane + delta, startLane - delta]) {
-        if (candidate !== 0 && !usedLanes.has(candidate)) return candidate;
+    for (let delta = 1; delta < LANE_COUNT; delta++) {
+      for (const candidate of [clampedStart + delta, clampedStart - delta]) {
+        if (candidate < LANE_MIN || candidate > LANE_MAX) continue;
+        if (!usedLanes.has(candidate)) return candidate;
       }
     }
-    return startLane > 0 ? startLane + 1 : startLane - 1; // フォールバック
+    return clampedStart; // フォールバック（全レーン使用済み・重なりを許容）
   }
 
   // ----------------------------------------------------------
-  // Y座標マップ（GapEngine・yToDateString 用の公開API）
+  // X座標マップ（GapEngine・orderFromViewportX 用の公開API）
   // ----------------------------------------------------------
 
   /**
-   * GapEngineに渡すための「イベントID → Y座標」マップを返す。
+   * GapEngineに渡すための「イベントID → X座標」マップを返す。
    * buildLayout より前に呼ばれるため、Gap情報なしで算出する暫定版。
    */
-  calcYPositions(
+  calcXPositions(
     sortedEvents: TimelineEvent[],
     gaps: GapSegment[],
     gapCompression: boolean
   ): Map<string, number> {
     const groups   = this.groupByDay(sortedEvents);
-    const yByOrder = this.calcYByDayGroup(groups, gaps, gapCompression);
+    const xByOrder = this.calcXByDayGroup(groups, gaps, gapCompression);
 
-    const yMap = new Map<string, number>();
+    const xMap = new Map<string, number>();
     for (const group of groups) {
-      const y = yByOrder.get(group.order) ?? 0;
+      const x = xByOrder.get(group.order) ?? 0;
       for (const event of group.events) {
-        yMap.set(event.id, y);
+        xMap.set(event.id, x);
       }
     }
-    return yMap;
+    return xMap;
   }
 
-  calcTotalHeight(nodes: LayoutNode[]): number {
-    if (nodes.length === 0) return 600;
-    return Math.max(...nodes.map((n) => n.y)) + 120;
+  calcTotalWidth(nodes: LayoutNode[]): number {
+    if (nodes.length === 0) return 800;
+    return Math.max(...nodes.map((n) => n.x)) + 140;
   }
 
-  calcX(lane: number, centerX: number): number {
-    // 時間軸セル幅 = LANE_WIDTH * 2 のため、
-    // lane=0  → centerX（時間軸中央）
-    // lane>0  → 時間軸右端 + (lane-1)*LANE_WIDTH + LANE_WIDTH/2（セル中央）
-    //         = centerX + LANE_WIDTH/2 + lane * LANE_WIDTH
-    // lane<0  → 時間軸左端 - |lane|*LANE_WIDTH + LANE_WIDTH/2（セル中央）
-    //         = centerX - LANE_WIDTH/2 + lane * LANE_WIDTH
-    if (lane === 0) return centerX;
-    if (lane > 0)   return centerX + LANE_WIDTH / 2 + lane * LANE_WIDTH;
-    return               centerX - LANE_WIDTH / 2 + lane * LANE_WIDTH;
+  /** レーン番号(1〜10) → SVG Y座標（行の中心） */
+  calcY(lane: number, lanesStartY: number): number {
+    const clamped = Math.max(LANE_MIN, Math.min(LANE_MAX, lane));
+    return lanesStartY + (clamped - LANE_MIN) * ROW_HEIGHT + ROW_HEIGHT / 2;
   }
 
   calcRadius(size: string, nodeScale: number): number {
-    const base = BASE_RADIUS[size] ?? BASE_RADIUS["medium"];
-    return base * nodeScale;
+    const multiplier = SIZE_MULTIPLIER[size] ?? SIZE_MULTIPLIER["medium"];
+    return BASE_UNIT_HALF_HEIGHT * multiplier * nodeScale;
   }
 
   /**
-   * D. SVGのY座標 → timelineOrder → date 文字列 への逆算
-   *
-   * @param calendarPrefix  暦プレフィックス（例: "帝国暦"）。
-   *                        呼び出し元で既存イベントのprefixを渡すこと。
-   */
-  /**
-   * クリック位置(ビューポートY)から日付文字列を逆算する。
+   * クリック位置(ビューポートX)から日付文字列を逆算する。
    *
    * 【設計方針】
-   * - nodes[i].y は calcYByDayGroup が生成した SVGユーザー座標（実際の描画Y）。
-   * - ビューポートY = node.y - scrollTop。
-   * - クリック位置 viewportY (= e.offsetY) と同じ座標系なので変換不要。
-   * - Gap展開/折りたたみ状態に関係なく、nodes の y 値は常に正しい描画位置を示す。
+   * - nodes[i].x は calcXByDayGroup が生成した SVGユーザー座標（実際の描画X）。
+   * - クリック位置 svgX (= e.offsetX) と同じ座標系なので変換不要。
+   * - Gap展開/折りたたみ状態に関係なく、nodes の x 値は常に正しい描画位置を示す。
    * - 区間ごとの px/日 定数で orderDiff を復元し、最初のイベントの order を基点に加算する。
    */
-  orderFromViewportY(
-    // svgY = e.offsetY（SVGユーザー座標、スクロール込み絶対Y）
-    // node.y も同じSVGユーザー座標なので変換不要
-    svgY: number,
+  orderFromViewportX(
+    // svgX = e.offsetX（SVGユーザー座標、スクロール込み絶対X）
+    svgX: number,
     nodes: LayoutNode[],
     gaps: GapSegment[],
     gapCompression: boolean,
@@ -278,26 +297,26 @@ export class LayoutEngine {
       return this.orderToDateString(0, calendarPrefix);
     }
 
-    // ① ユニークな (order, y) エントリをノードから生成
-    //    同日ノードは同じ y を持つので重複排除する
-    const seen = new Map<number, number>(); // order → svgY
+    // ① ユニークな (order, x) エントリをノードから生成
+    //    同日ノードは同じ x を持つので重複排除する
+    const seen = new Map<number, number>(); // order → svgX
     for (const node of nodes) {
       if (!seen.has(node.event.timelineOrder)) {
-        seen.set(node.event.timelineOrder, node.y);
+        seen.set(node.event.timelineOrder, node.x);
       }
     }
     const entries = Array.from(seen.entries())
-      .map(([order, y]) => ({ order, vy: y }))  // node.y はすでにSVGユーザー座標
-      .sort((a, b) => a.vy - b.vy);
+      .map(([order, x]) => ({ order, vx: x }))
+      .sort((a, b) => a.vx - b.vx);
 
     // ② 境界チェック
     const first = entries[0];
     const last  = entries[entries.length - 1];
 
-    if (svgY <= first.vy) {
+    if (svgX <= first.vx) {
       return this.orderToDateString(Math.max(0, first.order - 1), calendarPrefix);
     }
-    if (svgY >= last.vy) {
+    if (svgX >= last.vx) {
       return this.orderToDateString(last.order + 1, calendarPrefix);
     }
 
@@ -305,33 +324,29 @@ export class LayoutEngine {
     for (let i = 0; i < entries.length - 1; i++) {
       const cur  = entries[i];
       const next = entries[i + 1];
-      if (svgY < cur.vy || svgY > next.vy) continue;
+      if (svgX < cur.vx || svgX > next.vx) continue;
 
-      const segH = next.vy - cur.vy;
-      if (segH <= 0) {
+      const segW = next.vx - cur.vx;
+      if (segW <= 0) {
         return this.orderToDateString(cur.order, calendarPrefix);
       }
 
-      const dy        = svgY - cur.vy;
+      const dx        = svgX - cur.vx;
       const orderDiff = next.order - cur.order;
 
-      // 【重要】t = dy / segH（実際のセグメント高さで割る）を使う。
-      // calcYByDayGroup は Math.max(MIN_Y_GAP, orderDiff*Y_SCALE) や
-      // Math.max(EXPANDED_MIN_HEIGHT, orderDiff*EXPANDED_PX_PER_DAY) で
-      // Y高さを決めるため、「日数 ≠ Y/定数」になるケースがある。
-      // t = dy/segH → t*orderDiff なら実際のY比率がそのまま日数比率になり、
-      // MIN_Y_GAP / EXPANDED_MIN_HEIGHT の影響を完全に吸収できる。
-      const t = dy / segH;
+      // t = dx/segW（実際のセグメント幅で割る）を使うことで
+      // MIN_X_GAP / EXPANDED_MIN_WIDTH の影響を完全に吸収する。
+      const t = dx / segW;
       const rawOrder = Math.round(cur.order + t * orderDiff);
       const estimatedOrder = Math.max(cur.order, Math.min(next.order, rawOrder));
       return this.orderToDateString(estimatedOrder, calendarPrefix);
     }
 
-    // フォールバック: 最近傍エントリのorderを返す（絶対に year=1 にしない）
+    // フォールバック: 最近傍エントリのorderを返す
     let nearest = entries[0];
-    let minDist = Math.abs(svgY - entries[0].vy);
+    let minDist = Math.abs(svgX - entries[0].vx);
     for (const e of entries) {
-      const d = Math.abs(svgY - e.vy);
+      const d = Math.abs(svgX - e.vx);
       if (d < minDist) { minDist = d; nearest = e; }
     }
     return this.orderToDateString(nearest.order, calendarPrefix);
