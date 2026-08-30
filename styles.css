@@ -81,6 +81,19 @@
   cursor: default;
 }
 
+/* ------------------------------------------------------------
+   ボードズームラッパー
+   タイムラインボード全体（SVG）を CSS zoom で拡大縮小する対象。
+   display:inline-block でSVGの実寸に box を密着させ、
+   ズーム後のサイズが親(.ntj-timeline)のスクロール範囲に
+   正しく反映されるようにする。
+   ------------------------------------------------------------ */
+
+.ntj-timeline-zoom-wrapper {
+  display: inline-block;
+  transform-origin: top left;
+}
+
 .ntj-timeline svg {
   display: block;
 }
@@ -618,18 +631,22 @@
   align-items: center;
 }
 
-.ntj-sf-color-picker {
-  width: 36px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  cursor: pointer;
+/* 配色セットのプレビュー（選択中の色を丸で表示） */
+.ntj-sf-color-preview {
   flex-shrink: 0;
 }
 
-.ntj-sf-color-hex {
-  flex: 1;
+.ntj-sf-color-preview-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--background-modifier-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 600;
+  pointer-events: none;
 }
 
 .ntj-sf-btn-row {
@@ -971,4 +988,90 @@
 .ntj-view-mode-btn.is-active {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
+}
+
+/* ============================================================
+   配色セット管理モーダル（ColorPresetModal）
+   ============================================================ */
+
+.ntj-preset-modal .modal-content {
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.ntj-preset-modal-desc {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: -4px 0 12px 0;
+}
+
+.ntj-preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.ntj-preset-empty {
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.ntj-preset-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background-color: var(--background-secondary);
+}
+
+.ntj-preset-swatches {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ntj-preset-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.ntj-preset-swatch-text {
+  border-radius: 50%;
+}
+
+.ntj-preset-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ntj-preset-row-btns {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.ntj-preset-row-btns .ntj-sf-btn {
+  flex: none;
+  min-width: unset;
+  padding: 4px 10px;
+}
+
+.ntj-preset-edit-wrap {
+  border: 1px solid var(--interactive-accent);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.ntj-preset-form .setting-item {
+  border-top: none;
+  padding: 6px 0;
 }

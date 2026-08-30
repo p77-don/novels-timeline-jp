@@ -59,8 +59,10 @@ export interface RenderContext {
   onNodeHover:   (event: TimelineEvent, node: LayoutNode, mouseX: number, mouseY: number) => void;
   onNodeLeave:   () => void;
   onGapClick:    (gap: GapSegment) => void;
-  onContextMenu: (svgX: number, mouseX: number, mouseY: number) => void;
+  onContextMenu: (svgX: number, mouseX: number, mouseY: number, lane: number) => void;
   onLaneDrop:    (eventId: string, newLane: number) => void;
+  /** イベントの color フィールド（配色セットIDまたは生HEX値）を実色に解決する */
+  resolveNodeColors: (event: TimelineEvent) => { nodeColor: string; textColor: string };
 }
 
 /** render() 内部でのみ使用する、時間軸Y座標を加えた拡張コンテキスト */
@@ -147,9 +149,12 @@ export class TimelineRenderer {
 
     this.svg.oncontextmenu = (e: MouseEvent) => {
       e.preventDefault();
-      // e.offsetX はSVGユーザー座標（スクロール込みの絶対X）。
-      // node.x も同じSVGユーザー座標なので変換不要、そのまま渡す。
-      ctx.onContextMenu(e.offsetX, e.clientX, e.clientY);
+      // clientXToSvgX() / clientYToSvgY() は getScreenCTM() 経由でボードズームを含む
+      // 実際の描画スケールを考慮してSVGユーザー座標へ変換する。
+      // （e.offsetX/e.offsetY はズーム時にスケールされた値になるため使用不可）
+      const svgY = this.clientYToSvgY(e.clientY);
+      const lane = this.svgYToLane(svgY, this._lastLanesStartY);
+      ctx.onContextMenu(this.clientXToSvgX(e.clientX), e.clientX, e.clientY, lane);
     };
     this.svg.onmousemove = (e: MouseEvent) => {
       this.tooltip.move(e.clientX, e.clientY);
@@ -569,11 +574,12 @@ export class TimelineRenderer {
     const w        = this.estimatePillWidth(node);
     const h        = halfH * 2;
     const centerX  = node.x + w / 2;
+    const colors   = ctx.resolveNodeColors(node.event);
 
     // ノードの左端(node.x)が時間軸上の日付起点と一致するように描画する
     const shape = this.buildNodeShape(
       node.event.size, node.x, node.y, w, h,
-      isFiltered ? COLOR.nodeFiltered : node.event.color,
+      isFiltered ? COLOR.nodeFiltered : colors.nodeColor,
       isFiltered ? "0.25" : "1",
       isSelected ? COLOR.nodeStroke : "none",
       isSelected ? "2.5" : "0"
@@ -588,7 +594,7 @@ export class TimelineRenderer {
       label.setAttribute("dominant-baseline", "central");
       label.setAttribute("font-size",         String(fontSize));
       label.setAttribute("font-weight",       "600");
-      label.setAttribute("fill",              COLOR.nodeTextLight);
+      label.setAttribute("fill",              colors.textColor || COLOR.nodeTextLight);
       label.style.pointerEvents = "none";
       label.textContent = text;
       g.appendChild(label);
@@ -606,7 +612,7 @@ export class TimelineRenderer {
     }
 
     g.addEventListener("mouseenter", (e: MouseEvent) => {
-      this.tooltip.show(node.event, e.clientX, e.clientY);
+      this.tooltip.show(node.event, colors.nodeColor, e.clientX, e.clientY);
       ctx.onNodeHover(node.event, node, e.clientX, e.clientY);
     });
     g.addEventListener("mouseleave", () => {
@@ -802,7 +808,7 @@ export class TimelineRenderer {
   }
 
   /** SVG Y座標 → 最近傍のlane番号（1〜10） */
-  private svgYToLane(y: number, headerH: number): number {
+  svgYToLane(y: number, headerH: number): number {
     let bestLane = LANE_MIN;
     let bestDist = Infinity;
     for (let lane = LANE_MIN; lane <= LANE_MAX; lane++) {
@@ -835,6 +841,18 @@ export class TimelineRenderer {
     const totalW = parseFloat(this.svg.getAttribute("width") ?? "1");
     return (clientX - rect.left + this.container.scrollLeft)
          * (totalW / (rect.width || 1));
+  }
+
+  /** クライアントY座標 → SVGユーザー座標（ボードズーム込み） */
+  clientYToSvgY(clientY: number): number {
+    const ctm = this.svg.getScreenCTM();
+    if (ctm && ctm.d !== 0) {
+      return (clientY - ctm.f) / ctm.d;
+    }
+    const rect = this.svg.getBoundingClientRect();
+    const totalH = parseFloat(this.svg.getAttribute("height") ?? "1");
+    return (clientY - rect.top + this.container.scrollTop)
+         * (totalH / (rect.height || 1));
   }
 
   getSvgElement(): SVGSVGElement { return this.svg; }

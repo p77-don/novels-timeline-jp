@@ -5,13 +5,14 @@
 
 import { ItemView, WorkspaceLeaf, Notice, TFile } from "obsidian";
 import type NovelsTimelinePlugin from "../main";
-import { TimelineEvent } from "../types/TimelineTypes";
+import { TimelineEvent, ColorPreset } from "../types/TimelineTypes";
 import { DateParser } from "../parser/DateParser";
+import { ColorPresetModal } from "./ColorPresetModal";
 
 export const EVENT_SIDEBAR_VIEW_TYPE = "novels-timeline-jp-sidebar";
 
 export type SidebarMode =
-  | { type: "create"; dateStr: string }
+  | { type: "create"; dateStr: string; lane: number }
   | { type: "view-edit"; event: TimelineEvent }
   | { type: "idle" };
 
@@ -46,8 +47,8 @@ export class EventSidebarView extends ItemView {
   // 公開 API
   // ----------------------------------------------------------
 
-  showCreate(dateStr: string): void {
-    this.mode = { type: "create", dateStr };
+  showCreate(dateStr: string, lane: number): void {
+    this.mode = { type: "create", dateStr, lane };
     this.refresh();
   }
 
@@ -70,7 +71,7 @@ export class EventSidebarView extends ItemView {
     if (!this.contentEl2) return;
     this.contentEl2.empty();
     switch (this.mode.type) {
-      case "create":    this.renderCreate(this.mode.dateStr); break;
+      case "create":    this.renderCreate(this.mode.dateStr, this.mode.lane); break;
       case "view-edit": this.renderViewEdit(this.mode.event); break;
       default:          this.renderIdle(); break;
     }
@@ -107,7 +108,7 @@ export class EventSidebarView extends ItemView {
   // 新規イベント作成フォーム
   // ----------------------------------------------------------
 
-  private renderCreate(dateStr: string): void {
+  private renderCreate(dateStr: string, lane: number): void {
     const el = this.contentEl2;
     el.createEl("h3", { cls: "ntj-sidebar-heading", text: "新規イベント作成" });
 
@@ -123,10 +124,11 @@ export class EventSidebarView extends ItemView {
       i.id = "ntj-f-date"; i.value = dateStr; i.placeholder = this.datePlaceholder();
     });
 
-    // レーン
+    // レーン（右クリック位置から自動取得、手動修正も可）
     this.addField(el, "レーン（1〜10）", (w) => {
       const i = w.createEl("input", { type: "number", cls: "ntj-sf-input" });
-      i.id = "ntj-f-lane"; i.value = "1"; i.min = "1"; i.max = "10";
+      const clampedLane = Math.max(1, Math.min(10, Math.round(lane)));
+      i.id = "ntj-f-lane"; i.value = String(clampedLane); i.min = "1"; i.max = "10";
     });
 
     // サイズ
@@ -138,8 +140,12 @@ export class EventSidebarView extends ItemView {
       }
     });
 
-    // カラー
-    this.addColorField(el, "ntj-f-color", "#808080");
+    // 配色セット（新規作成時は最初のセットを既定値に。無ければグレーのカスタム値）
+    {
+      const presets = this.plugin.colorPresetStore.getAll();
+      const defaultColor = presets.length > 0 ? presets[0].id : "#808080";
+      this.addColorPresetField(el, "ntj-f", defaultColor);
+    }
 
     // 登場人物
     this.addField(el, "登場人物（カンマ区切り）", (w) => {
@@ -219,8 +225,8 @@ export class EventSidebarView extends ItemView {
       }
     });
 
-    // カラー
-    this.addColorField(el, "ntj-e-color", event.color || "#808080");
+    // 配色セット
+    this.addColorPresetField(el, "ntj-e", event.color || "#808080");
 
     // 登場人物
     this.addField(el, "登場人物（カンマ区切り）", (w) => {
@@ -471,9 +477,9 @@ export class EventSidebarView extends ItemView {
       errors.push("レーンは 1〜10 の整数を入力してください。");
     }
 
-    // ── カラー ──
-    if (colorVal && !/^#[0-9A-Fa-f]{6}$/.test(colorVal)) {
-      errors.push("カラーは #RRGGBB 形式（例: #4A90E2）で入力してください。");
+    // ── カラー（配色セットID、またはレガシーな生HEX値） ──
+    if (!colorVal) {
+      errors.push("配色セットを選択してください。");
     }
 
     return errors;
@@ -550,8 +556,8 @@ export class EventSidebarView extends ItemView {
     ].join("\n");
 
     try {
-      const file = await vault.create(fullPath, template);
-      await this.plugin.app.workspace.getLeaf(false).openFile(file);
+      await vault.create(fullPath, template);
+      // 作成のたびにノートが開くと煩わしいため、ここでは開かない。
       new Notice(`作成しました: ${fullPath}`);
     } catch (e) {
       new Notice(`作成に失敗しました: ${(e as Error).message}`);
@@ -568,6 +574,10 @@ export class EventSidebarView extends ItemView {
    *   1.date  2.lane  3.size  4.color
    *   5.characters  6.locations  7.summary  8.links
    * キーの有無・元の順序に関わらず常に同じレイアウトで書き出す。
+   *
+   * color には配色セットのID（または後方互換の生HEX値）を書き込む。
+   * これにより配色セット側の色を変更すれば、参照する全イベントの表示色を
+   * 一括で変更できる。
    */
   private rewriteBlock(content: string, fields: {
     date: string; lane: number; size: string; color: string;
@@ -588,7 +598,7 @@ export class EventSidebarView extends ItemView {
         // 3. size
         lines.push(`size: ${fields.size}`);
         lines.push("");
-        // 4. color
+        // 4. color（配色セットID）
         lines.push(`color: "${fields.color}"`);
         lines.push("");
         // 5. characters
@@ -659,18 +669,74 @@ export class EventSidebarView extends ItemView {
     build(field.createDiv({ cls: "ntj-sf-input-wrapper" }));
   }
 
-  private addColorField(parent: HTMLElement, id: string, initial: string): void {
-    this.addField(parent, "カラー", (w) => {
-      const row    = w.createDiv({ cls: "ntj-sf-color-row" });
-      const picker = row.createEl("input", { type: "color", cls: "ntj-sf-color-picker" });
-      picker.value = initial;
-      const hex    = row.createEl("input", { type: "text", cls: "ntj-sf-input ntj-sf-color-hex" });
-      hex.id       = id;
-      hex.value    = initial;
-      picker.addEventListener("input", () => { hex.value = picker.value; });
-      hex.addEventListener("input",   () => {
-        if (/^#[0-9A-Fa-f]{6}$/.test(hex.value)) picker.value = hex.value;
+  /**
+   * 配色セットから選択するフィールド。
+   * 選択結果は隠しinput（id: `${idPrefix}-color`）に「配色セットのID」として
+   * 書き込まれる（実色ではない）。submitCreate/submitEdit はこのIDをそのまま
+   * イベントノートの color フィールドへ保存する。
+   * こうすることで、配色セット側の色を変更すれば、それを参照する
+   * 全イベントの表示色を一括で変更できる。
+   *
+   * currentColorValue は既存イベントの color フィールドの現在値
+   * （配色セットIDまたは配色セット導入前の生HEX値）。
+   * どの配色セットにも一致しない場合は、データを勝手に書き換えないよう
+   * 「カスタム（現在の色）」を選択肢に加え、その値をそのまま保持する。
+   */
+  private addColorPresetField(
+    parent: HTMLElement,
+    idPrefix: string,
+    currentColorValue: string
+  ): void {
+    const store = this.plugin.colorPresetStore;
+
+    this.addField(parent, "配色セット", (w) => {
+      const row = w.createDiv({ cls: "ntj-sf-color-row" });
+
+      const select = row.createEl("select", { cls: "ntj-sf-input" });
+
+      const previewWrap = row.createDiv({ cls: "ntj-sf-color-preview" });
+      const previewSwatch = previewWrap.createDiv({ cls: "ntj-sf-color-preview-swatch" });
+      previewSwatch.setText("12");
+
+      const colorInput = row.createEl("input", { type: "hidden" });
+      colorInput.id = `${idPrefix}-color`;
+
+      const applySelection = (): void => {
+        colorInput.value = select.value === "__custom__" ? currentColorValue : select.value;
+        const colors = store.resolve(colorInput.value);
+        previewSwatch.style.backgroundColor = colors.nodeColor;
+        previewSwatch.style.color           = colors.textColor;
+      };
+
+      const populate = (): void => {
+        select.empty();
+        const presets: ColorPreset[] = store.getAll();
+        const matched = store.getById(currentColorValue);
+
+        if (!matched) {
+          const customOpt = select.createEl("option", { text: "カスタム（現在の色）" });
+          customOpt.value = "__custom__";
+        }
+
+        for (const p of presets) {
+          const opt = select.createEl("option", { text: p.name });
+          opt.value = p.id;
+        }
+
+        select.value = matched ? matched.id : "__custom__";
+        applySelection();
+      };
+
+      select.addEventListener("change", applySelection);
+
+      const editBtn = row.createEl("button", {
+        type: "button", cls: "ntj-sf-btn", text: "編集...",
       });
+      editBtn.addEventListener("click", () => {
+        new ColorPresetModal(this.plugin.app, store, () => populate()).open();
+      });
+
+      populate();
     });
   }
 }

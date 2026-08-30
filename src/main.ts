@@ -8,12 +8,17 @@ import { NovelsTimelineSettings, DEFAULT_SETTINGS } from "./settings/PluginSetti
 import { TimelineView, TIMELINE_VIEW_TYPE } from "./view/TimelineView";
 import { EventSidebarView, EVENT_SIDEBAR_VIEW_TYPE } from "./view/EventSidebarView";
 import { NovelsTimelineSettingTab } from "./settings/SettingsTab";
+import { ColorPresetStore } from "./store/ColorPresetStore";
 
 export default class NovelsTimelinePlugin extends Plugin {
   settings!: NovelsTimelineSettings;
+  colorPresetStore!: ColorPresetStore;
 
   async onload(): Promise<void> {
     await this.loadSettings();
+
+    this.colorPresetStore = new ColorPresetStore(this.app);
+    await this.colorPresetStore.load();
 
     this.registerView(
       TIMELINE_VIEW_TYPE,

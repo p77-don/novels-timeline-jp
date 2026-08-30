@@ -46,8 +46,8 @@ export interface NovelsTimelineSettings {
   excludedFolders: string[];
 
   // --- Display ---
-  /** ノード倍率（50〜300） */
-  nodeScale: number;
+  /** タイムラインボードの拡大率（50〜200、Shift+ホイールで変更） */
+  boardZoom: number;
 
   // --- Timeline ---
   /** Gap圧縮ON/OFF */
@@ -87,6 +87,18 @@ export interface NovelsTimelineSettings {
 }
 
 // ------------------------------------------------------------
+// ボードズーム（タイムラインボードの拡大率）
+// Shift+ホイールで変更する。ノード単体の倍率ではなく、
+// スクロール範囲全体（ボード）を拡大縮小する。
+// ------------------------------------------------------------
+
+export const BOARD_ZOOM_MIN     = 50;
+export const BOARD_ZOOM_MAX     = 200;
+export const BOARD_ZOOM_DEFAULT = 100;
+/** Shift+ホイール1ステップあたりの変化量(%) */
+export const BOARD_ZOOM_STEP    = 10;
+
+// ------------------------------------------------------------
 // デフォルト設定値
 // ------------------------------------------------------------
 
@@ -94,7 +106,7 @@ export const DEFAULT_SETTINGS: NovelsTimelineSettings = {
   newEventFolder: "",
   excludedFolders: [],
 
-  nodeScale: 100,
+  boardZoom: 100,
 
   gapCompression: true,
   gapThreshold: 30,

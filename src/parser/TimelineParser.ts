@@ -236,11 +236,18 @@ export class TimelineParser {
     return "medium";
   }
 
-  private parseColorField(value: unknown): string {
-    if (typeof value === "string" && /^#[0-9A-Fa-f]{3,8}$/.test(value.trim())) {
+  /**
+   * color フィールドを解釈する。
+   * 通常は配色セットのID（例: "preset-1735500000-1234"）を保持するが、
+   * 配色セット導入前の古いノートに残る生のHEXコード（例: "#4A90E2"）も
+   * そのまま許容する（実色解決は ColorPresetStore.resolve() が行う）。
+   * 空・不正な値の場合のみ既定値にフォールバックする。
+   */
+  private parseColorField(value: unknown, defaultVal: string = "#808080"): string {
+    if (typeof value === "string" && value.trim().length > 0) {
       return value.trim();
     }
-    return "#808080";
+    return defaultVal;
   }
 
   private parseStringArray(value: unknown): string[] {

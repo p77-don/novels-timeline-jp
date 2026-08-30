@@ -39,7 +39,7 @@ export const LANE_LABEL_W = 56;
 const SIZE_MULTIPLIER: Record<string, number> = {
   small: 1, medium: 1.5, big: 2,
 };
-/** 「小」サイズにおける基準半径(px)（等倍・nodeScale=1のとき） */
+/** 「小」サイズにおける基準半径(px)（等倍のとき） */
 const BASE_UNIT_HALF_HEIGHT = 8;
 /** タイムライン開始X座標(px) — 左固定列と重ならないよう余白を確保 */
 const START_X               = LANE_LABEL_W + 20;
@@ -98,7 +98,6 @@ export class LayoutEngine {
   buildLayout(
     sortedEvents: TimelineEvent[],
     lanesStartY: number,
-    nodeScale: number,
     gaps: GapSegment[],
     gapCompression: boolean
   ): LayoutNode[] {
@@ -114,7 +113,7 @@ export class LayoutEngine {
     const nodes: LayoutNode[] = [];
     for (const group of dayGroups) {
       const x = xByOrder.get(group.order) ?? 0;
-      this.resolveGroupLayout(group.events, x, lanesStartY, nodeScale, nodes);
+      this.resolveGroupLayout(group.events, x, lanesStartY, nodes);
     }
 
     return nodes;
@@ -194,7 +193,6 @@ export class LayoutEngine {
     events: TimelineEvent[],
     x: number,
     lanesStartY: number,
-    nodeScale: number,
     out: LayoutNode[]
   ): void {
     // このグループで使用済みのlane番号
@@ -210,7 +208,7 @@ export class LayoutEngine {
     // LayoutNode を生成
     for (const { event, effectiveLane } of resolved) {
       const y      = this.calcY(effectiveLane, lanesStartY);
-      const radius = this.calcRadius(event.size, nodeScale);
+      const radius = this.calcRadius(event.size);
       out.push({ event, x, y, radius });
     }
   }
@@ -271,9 +269,9 @@ export class LayoutEngine {
     return lanesStartY + (clamped - LANE_MIN) * ROW_HEIGHT + ROW_HEIGHT / 2;
   }
 
-  calcRadius(size: string, nodeScale: number): number {
+  calcRadius(size: string): number {
     const multiplier = SIZE_MULTIPLIER[size] ?? SIZE_MULTIPLIER["medium"];
-    return BASE_UNIT_HALF_HEIGHT * multiplier * nodeScale;
+    return BASE_UNIT_HALF_HEIGHT * multiplier;
   }
 
   /**
@@ -281,12 +279,13 @@ export class LayoutEngine {
    *
    * 【設計方針】
    * - nodes[i].x は calcXByDayGroup が生成した SVGユーザー座標（実際の描画X）。
-   * - クリック位置 svgX (= e.offsetX) と同じ座標系なので変換不要。
+   * - クリック位置 svgX は TimelineRenderer.clientXToSvgX() で変換済みの
+   *   SVGユーザー座標（ボードズームを考慮済み）を渡すこと。
    * - Gap展開/折りたたみ状態に関係なく、nodes の x 値は常に正しい描画位置を示す。
    * - 区間ごとの px/日 定数で orderDiff を復元し、最初のイベントの order を基点に加算する。
    */
   orderFromViewportX(
-    // svgX = e.offsetX（SVGユーザー座標、スクロール込み絶対X）
+    // svgX = clientXToSvgX() で変換済みのSVGユーザー座標（スクロール込み絶対X）
     svgX: number,
     nodes: LayoutNode[],
     gaps: GapSegment[],

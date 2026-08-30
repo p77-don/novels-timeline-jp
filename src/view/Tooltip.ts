@@ -20,11 +20,11 @@ export class Tooltip {
     this.el.style.pointerEvents = "none";
   }
 
-  show(event: TimelineEvent, mouseX: number, mouseY: number): void {
+  show(event: TimelineEvent, nodeColor: string, mouseX: number, mouseY: number): void {
     this.el.empty();
     // イベント自身の色をアクセント帯として使い、
     // 「どのノードの情報か」を視覚的にも繋げる
-    this.el.style.borderLeft = `3px solid ${event.color || "var(--interactive-accent)"}`;
+    this.el.style.borderLeft = `3px solid ${nodeColor || "var(--interactive-accent)"}`;
 
     this.el.createEl("div", { cls: "ntj-tooltip-title", text: event.displayTitle });
 

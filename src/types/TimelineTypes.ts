@@ -66,7 +66,13 @@ export interface TimelineEvent {
   /** ノードサイズ */
   size: EventSize;
 
-  /** カラーコード（HEX） */
+  /**
+   * ノードの色を表す値。
+   * 通常は「配色セット（ColorPreset）」のIDを保存する（一括変更を可能にするため）。
+   * 後方互換のため、配色セット導入前に作成されたノートに残る
+   * 生のHEXカラーコード（例: "#4A90E2"）もそのまま解釈できる。
+   * 実際の色解決は ColorPresetStore.resolve() が行う。
+   */
   color: string;
 
   /** 登場人物一覧 */
@@ -92,6 +98,30 @@ export type TimelineEventError =
   | "invalid_date"
   | "missing_required_field"
   | "multiple_timeline_blocks";
+
+// ------------------------------------------------------------
+// 配色セット（ノード色＋文字色のプリセット）
+// JSON ファイルとして保存し、専用モーダルで作成・編集する。
+// イベントノートの color フィールドにはこの配色セットのIDを保存し、
+// 実際の色（ノード色・文字色）は描画時に ColorPresetStore.resolve() で解決する。
+// これにより、配色セットを編集すれば参照している全イベントの色を
+// 一括で変更できる（イベントノート自体には生のHEX値を書き込まない）。
+// ------------------------------------------------------------
+
+export interface ColorPreset {
+  /** 一意なID（作成時刻ベースなど） */
+  id: string;
+  /** プリセット名（例: "主人公", "敵対勢力", "回想"） */
+  name: string;
+  /** ノード（図形）の色 */
+  nodeColor: string;
+  /** ノード内テキスト（日にちバッジ）の色 */
+  textColor: string;
+}
+
+export interface ColorPresetFile {
+  presets: ColorPreset[];
+}
 
 // ------------------------------------------------------------
 // キャッシュ

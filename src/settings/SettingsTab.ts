@@ -6,7 +6,8 @@
 import { App, PluginSettingTab, Setting, Notice } from "obsidian";
 import type NovelsTimelinePlugin from "../main";
 import { CalendarMonth, CalendarSettings } from "../types/TimelineTypes";
-import { DEFAULT_CALENDAR } from "./PluginSettings";
+import { DEFAULT_CALENDAR, BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, BOARD_ZOOM_DEFAULT } from "./PluginSettings";
+import { ColorPresetModal } from "../view/ColorPresetModal";
 
 export class NovelsTimelineSettingTab extends PluginSettingTab {
   plugin: NovelsTimelinePlugin;
@@ -61,17 +62,45 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
     containerEl.createEl("h2", { text: "Display" });
 
     new Setting(containerEl)
-      .setName("Node Scale")
-      .setDesc("ノード倍率（50〜300%）")
+      .setName("Board Zoom")
+      .setDesc(
+        `タイムラインボードの拡大率（${BOARD_ZOOM_MIN}〜${BOARD_ZOOM_MAX}%）。` +
+        "タイムライン上で Shift+ホイールでも変更できます。"
+      )
       .addSlider((slider) =>
         slider
-          .setLimits(50, 300, 10)
-          .setValue(this.plugin.settings.nodeScale)
+          .setLimits(BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, 10)
+          .setValue(this.plugin.settings.boardZoom)
           .setDynamicTooltip()
           .onChange(async (value) => {
-            this.plugin.settings.nodeScale = value;
+            this.plugin.settings.boardZoom = value;
             await this.plugin.saveSettings();
             this.plugin.notifySettingsChanged();
+          })
+      )
+      .addExtraButton((btn) =>
+        btn
+          .setIcon("reset")
+          .setTooltip(`${BOARD_ZOOM_DEFAULT}%に戻す`)
+          .onClick(async () => {
+            this.plugin.settings.boardZoom = BOARD_ZOOM_DEFAULT;
+            await this.plugin.saveSettings();
+            this.plugin.notifySettingsChanged();
+            this.display();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("配色セット")
+      .setDesc("イベント作成・編集時に選べる「ノード色＋文字色」の組み合わせを管理します。")
+      .addButton((btn) =>
+        btn
+          .setButtonText("配色セットを管理...")
+          .onClick(() => {
+            new ColorPresetModal(this.app, this.plugin.colorPresetStore, () => {
+              /* サイドバーは開かれるたびに最新の配色セットを読み込むため、
+                 ここでは特に何もしなくてよい。 */
+            }).open();
           })
       );
 

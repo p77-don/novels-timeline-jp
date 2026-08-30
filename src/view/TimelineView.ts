@@ -21,7 +21,12 @@ import { FilterEngine }     from "../engine/FilterEngine";
 import { TimelineRenderer, DateRow } from "./TimelineRenderer";
 import { TableView } from "./TableView";
 import { DateParser } from "../parser/DateParser";
-import { getMonthDef } from "../settings/PluginSettings";
+import {
+  getMonthDef,
+  BOARD_ZOOM_MIN,
+  BOARD_ZOOM_MAX,
+  BOARD_ZOOM_STEP,
+} from "../settings/PluginSettings";
 
 import {
   TimelineEvent,
@@ -59,16 +64,19 @@ export class TimelineView extends ItemView {
 
   private toolbarEl!:    HTMLElement;
   private timelineEl!:   HTMLElement;
+  private zoomWrapperEl!: HTMLElement;
   private tableContainerEl!: HTMLElement;
   private searchInput!:  HTMLInputElement;
   private debugOverlay!: HTMLElement;
   private viewModeBtn!:  HTMLElement;
+  private zoomIndicatorEl!: HTMLElement;
 
   private viewMode: "timeline" | "table" = "timeline";
   private tableView!: TableView;
 
   // タイマーID
   private renderTimer:    ReturnType<typeof setTimeout> | null = null;
+  private zoomSaveTimer:  ReturnType<typeof setTimeout> | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: NovelsTimelinePlugin) {
     super(leaf);
@@ -97,6 +105,7 @@ export class TimelineView extends ItemView {
   async onClose(): Promise<void> {
     // タイマーをすべてクリア（フリーズ防止）
     if (this.renderTimer)   clearTimeout(this.renderTimer);
+    if (this.zoomSaveTimer) clearTimeout(this.zoomSaveTimer);
     this.renderer?.destroy();
   }
 
@@ -113,7 +122,13 @@ export class TimelineView extends ItemView {
     this.buildToolbar();
 
     this.timelineEl = root.createDiv({ cls: "ntj-timeline" });
-    this.renderer   = new TimelineRenderer(this.timelineEl);
+
+    // ズームラッパー：この要素にのみ CSS zoom を適用し、
+    // ボード（スクロール範囲）全体を拡大縮小する。
+    // デバッグオーバーレイはこの外側（timelineEl直下）に置き、ズームの影響を受けない。
+    this.zoomWrapperEl = this.timelineEl.createDiv({ cls: "ntj-timeline-zoom-wrapper" });
+    this.renderer = new TimelineRenderer(this.zoomWrapperEl);
+    this.applyBoardZoom();
 
     this.tableContainerEl = root.createDiv({ cls: "ntj-table-container" });
     this.tableContainerEl.style.display = "none";
@@ -136,8 +151,15 @@ export class TimelineView extends ItemView {
       }
     });
 
-    // Ctrl+ホイール → 左右スクロール
+    // Shift+ホイール → ボードズーム（拡大縮小）
+    // Ctrl/Cmd+ホイール → 左右スクロール
     this.timelineEl.addEventListener("wheel", (e: WheelEvent) => {
+      if (e.shiftKey) {
+        e.preventDefault();
+        // 上スクロール(deltaY<0) = 拡大、下スクロール(deltaY>0) = 縮小
+        this.adjustBoardZoom(e.deltaY < 0 ? BOARD_ZOOM_STEP : -BOARD_ZOOM_STEP);
+        return;
+      }
       if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
       // deltaY を横スクロール量として使用（1ステップ=60px）
@@ -148,6 +170,51 @@ export class TimelineView extends ItemView {
     // ドラッグパン（上下左右）
     // ノードのドラッグ（lane変更）と区別するため、SVG背景上のみ反応させる
     this.registerPanEvents();
+  }
+
+  // ----------------------------------------------------------
+  // ボードズーム（タイムラインボード全体の拡大縮小）
+  // ノード単体の倍率ではなく、スクロール可能なボード全体を
+  // CSS zoom で拡大縮小する。範囲: 50%〜200%、既定値: 100%
+  // ----------------------------------------------------------
+
+  /** 現在の設定値を zoomWrapperEl に反映する */
+  private applyBoardZoom(): void {
+    const zoom = this.plugin.settings.boardZoom;
+    this.zoomWrapperEl.style.zoom = `${zoom / 100}`;
+    if (this.zoomIndicatorEl) this.zoomIndicatorEl.textContent = `${zoom}%`;
+  }
+
+  /**
+   * ホイール操作等でズーム値を段階的に変更する。
+   * ★ 設定の保存(saveSettings)は高頻度イベントから直接呼ばない
+   *   （wheel連打→保存の連鎖でフリーズする恐れがあるため、デバウンスする）。
+   */
+  private adjustBoardZoom(deltaPercent: number): void {
+    const settings = this.plugin.settings;
+    const newZoom = Math.max(
+      BOARD_ZOOM_MIN,
+      Math.min(BOARD_ZOOM_MAX, settings.boardZoom + deltaPercent)
+    );
+    if (newZoom === settings.boardZoom) return;
+
+    settings.boardZoom = newZoom;
+    this.applyBoardZoom();
+    this.scheduleRender();
+
+    if (this.zoomSaveTimer) clearTimeout(this.zoomSaveTimer);
+    this.zoomSaveTimer = setTimeout(() => {
+      void this.plugin.saveSettings();
+    }, 400);
+  }
+
+  /** ズーム値を既定値(100%)にリセットする */
+  private resetBoardZoom(): void {
+    if (this.plugin.settings.boardZoom === 100) return;
+    this.plugin.settings.boardZoom = 100;
+    this.applyBoardZoom();
+    this.scheduleRender();
+    void this.plugin.saveSettings();
   }
 
   // ドラッグパン状態
@@ -245,6 +312,14 @@ export class TimelineView extends ItemView {
     this.viewModeBtn.addEventListener("click", () => {
       this.toggleViewMode();
     });
+
+    // ─── ボードズーム表示（クリックで100%にリセット） ───
+    this.zoomIndicatorEl = this.toolbarEl.createEl("button", {
+      cls:   "ntj-btn ntj-zoom-indicator",
+      text:  `${this.plugin.settings.boardZoom}%`,
+      title: "タイムライン上で Shift+ホイールで拡大縮小（クリックで100%にリセット）",
+    });
+    this.zoomIndicatorEl.addEventListener("click", () => this.resetBoardZoom());
   }
 
   /**
@@ -433,8 +508,7 @@ export class TimelineView extends ItemView {
 
     // Step3: ノード配置（確定した gaps を使って正式X座標を計算する）
     this.nodes = this.layoutEngine.buildLayout(
-      validEvents, LANES_START_Y, settings.nodeScale / 100,
-      this.gaps, settings.gapCompression
+      validEvents, LANES_START_Y, this.gaps, settings.gapCompression
     );
 
     // Step4: 確定した LayoutNode（実際の描画幅を含む）でGapの表示位置を更新する
@@ -443,12 +517,17 @@ export class TimelineView extends ItemView {
     const totalWidth = this.layoutEngine.calcTotalWidth(this.nodes);
     const edges       = this.relationEngine.buildEdges(validEvents, this.nodes);
 
+    // ボードズームは timelineEl の子（zoomWrapperEl）にのみ CSS zoom で適用しているため、
+    // timelineEl 自身の scrollLeft/scrollTop/clientWidth/clientHeight は
+    // 「ズーム後」の実座標系になっている。SVGユーザー座標（ズーム前）と揃えるため
+    // ズーム倍率で割り戻す。
+    const zoomFactor = this.plugin.settings.boardZoom / 100;
     const virtualWindow: VirtualWindow = {
-      scrollTop:      this.timelineEl.scrollTop,
-      scrollLeft:     this.timelineEl.scrollLeft,
-      viewportHeight: this.timelineEl.clientHeight,
-      viewportWidth:  this.timelineEl.clientWidth,
-      buffer:         settings.renderBuffer,
+      scrollTop:      this.timelineEl.scrollTop  / zoomFactor,
+      scrollLeft:     this.timelineEl.scrollLeft / zoomFactor,
+      viewportHeight: this.timelineEl.clientHeight / zoomFactor,
+      viewportWidth:  this.timelineEl.clientWidth  / zoomFactor,
+      buffer:         settings.renderBuffer / zoomFactor,
     };
 
     this.renderer.render({
@@ -465,8 +544,9 @@ export class TimelineView extends ItemView {
       onNodeHover:   () => { /* Tooltip は Renderer 内で処理済み */ },
       onNodeLeave:   () => { /* Tooltip hide は Renderer 内で処理済み */ },
       onGapClick:    (gap) => this.handleGapClick(gap),
-      onContextMenu: (svgX, mx, my) => this.handleContextMenu(svgX, mx, my),
+      onContextMenu: (svgX, mx, my, lane) => this.handleContextMenu(svgX, mx, my, lane),
       onLaneDrop:    (eventId, targetLane) => this.handleLaneDrop(eventId, targetLane),
+      resolveNodeColors: (event) => this.plugin.colorPresetStore.resolve(event.color),
     });
 
     // テーブルビューも最新データで更新（表示中かどうかに関わらず）
@@ -500,7 +580,7 @@ export class TimelineView extends ItemView {
       `gaps:    ${gapCount}`,
       `render:  ${renderMs.toFixed(1)}ms`,
       `scroll:  ${this.timelineEl.scrollTop.toFixed(0)}px`,
-      `scale:   ${this.plugin.settings.nodeScale}%`,
+      `zoom:    ${this.plugin.settings.boardZoom}%`,
     ].join("<br>");
   }
 
@@ -541,11 +621,10 @@ export class TimelineView extends ItemView {
     this.scheduleRender();
   }
 
-  private handleContextMenu(svgX: number, mouseX: number, mouseY: number): void {
+  private handleContextMenu(svgX: number, mouseX: number, mouseY: number, lane: number): void {
     const settings  = this.plugin.settings;
 
-    // e.offsetX（SVGユーザー座標）をそのまま渡す。
-    // node.x も同じSVGユーザー座標なので変換不要。
+    // svgX は clientXToSvgX() で変換済みのSVGユーザー座標（ボードズーム考慮済み）。
     const dateStr = this.layoutEngine.orderFromViewportX(
       svgX, this.nodes, this.gaps, settings.gapCompression, ""
     );
@@ -558,7 +637,7 @@ export class TimelineView extends ItemView {
       item.setIcon("file-plus");
       item.onClick(async () => {
         const sidebar = await this.plugin.getOrOpenSidebarView();
-        sidebar?.showCreate(dateStr);
+        sidebar?.showCreate(dateStr, lane);
       });
     });
 
