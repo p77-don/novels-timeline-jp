@@ -3,7 +3,7 @@
 // Novels Timeline JP — 設定画面
 // ============================================================
 
-import { App, PluginSettingTab, Setting, Notice } from "obsidian";
+import { App, PluginSettingTab, Setting, Notice, normalizePath } from "obsidian";
 import type NovelsTimelinePlugin from "../main";
 import { CalendarMonth, CalendarSettings } from "../types/TimelineTypes";
 import { DEFAULT_CALENDAR, BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, BOARD_ZOOM_DEFAULT, GAP_THRESHOLD_MIN, GAP_THRESHOLD_MAX, GAP_THRESHOLD_DEFAULT, GAP_THRESHOLD_STEP } from "./PluginSettings";
@@ -33,7 +33,8 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
           .setPlaceholder("例: events / stories/chapter1")
           .setValue(this.plugin.settings.newEventFolder)
           .onChange(async (value) => {
-            this.plugin.settings.newEventFolder = value.trim().replace(/\/$/, "");
+            const trimmed = value.trim();
+            this.plugin.settings.newEventFolder = trimmed ? normalizePath(trimmed) : "";
             await this.plugin.saveSettings();
           })
       );
@@ -49,7 +50,8 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
             this.plugin.settings.excludedFolders = value
               .split(",")
               .map((s) => s.trim())
-              .filter((s) => s !== "");
+              .filter((s) => s !== "")
+              .map((s) => normalizePath(s));
             await this.plugin.saveSettings();
             this.plugin.notifySettingsChanged();
           })

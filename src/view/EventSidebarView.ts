@@ -9,7 +9,7 @@
 // フロントマターキーを壊さないようにする。
 // ============================================================
 
-import { ItemView, WorkspaceLeaf, Notice } from "obsidian";
+import { ItemView, WorkspaceLeaf, Notice, normalizePath } from "obsidian";
 import type NovelsTimelinePlugin from "../main";
 import { TimelineEvent, ColorPreset } from "../types/TimelineTypes";
 import { DateParser } from "../parser/DateParser";
@@ -518,9 +518,9 @@ export class EventSidebarView extends ItemView {
       const oldBaseName = file.basename;
       const prefix      = oldBaseName.match(/^(\d+)-/)?.[1] ?? "";
       const newBaseName = prefix ? `${prefix}-${title}` : title;
-      const newFullPath = file.parent
-        ? `${file.parent.path}/${newBaseName}.md`
-        : `${newBaseName}.md`;
+      const newFullPath = normalizePath(
+        file.parent ? `${file.parent.path}/${newBaseName}.md` : `${newBaseName}.md`
+      );
 
       if (newBaseName !== oldBaseName) {
         await this.plugin.app.fileManager.renameFile(file, newFullPath);
@@ -623,8 +623,10 @@ export class EventSidebarView extends ItemView {
     const nextNumber = this.getNextFileNumber();
     const padded     = String(nextNumber).padStart(4, "0");
     const fileName   = `${padded}-${params.title}.md`;
-    const folder     = params.folder;
-    const fullPath   = folder ? `${folder}/${fileName}` : fileName;
+    // フォルダ設定はユーザー入力由来のため、区切り文字の揺れ（\ と / の混在、
+    // 先頭/末尾の余分なスラッシュ等）を normalizePath() で正規化してから使う。
+    const folder     = params.folder ? normalizePath(params.folder) : "";
+    const fullPath   = normalizePath(folder ? `${folder}/${fileName}` : fileName);
 
     if (folder) {
       if (!vault.getAbstractFileByPath(folder)) {

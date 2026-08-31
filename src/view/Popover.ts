@@ -20,20 +20,29 @@ export class Popover {
     startTop:    0,
   };
 
+  // document に登録したリスナーは要素の破棄では自動解除されないため、
+  // destroy() で removeEventListener できるよう参照を保持しておく。
+  private readonly onDocMouseDown: (e: MouseEvent) => void;
+  private readonly onDocMouseMove: (e: MouseEvent) => void;
+  private readonly onDocMouseUp:   () => void;
+
   constructor(container: HTMLElement) {
     this.el = container.createDiv({ cls: "ntj-popover" });
     // display / position / z-index は styles.css の
     // .ntj-popover / .ntj-popover.is-visible で定義する
 
     // 外側クリックで閉じる（Popover自身とそのドラッグ操作は除外）
-    document.addEventListener("mousedown", (e) => {
+    this.onDocMouseDown = (e) => {
       if (!this.el.contains(e.target as Node) && !this.drag.active) {
         this.hide();
       }
-    });
+    };
+    this.onDocMouseMove = (e) => this.onMouseMove(e);
+    this.onDocMouseUp   = ()  => this.onMouseUp();
 
-    document.addEventListener("mousemove", (e) => this.onMouseMove(e));
-    document.addEventListener("mouseup",   ()  => this.onMouseUp());
+    document.addEventListener("mousedown", this.onDocMouseDown);
+    document.addEventListener("mousemove", this.onDocMouseMove);
+    document.addEventListener("mouseup",   this.onDocMouseUp);
   }
 
   setOnLinkClick(fn: (eventId: string) => void): void {
@@ -124,6 +133,19 @@ export class Popover {
 
   hide(): void {
     this.el.toggleClass("is-visible", false);
+  }
+
+  /**
+   * プラグイン/ビュー破棄時に呼び出すこと。
+   * document に登録した mousedown/mousemove/mouseup を解除し、DOM も片付ける。
+   * これを呼ばないと、Popover を再生成するたびに document のリスナーが
+   * 蓄積し続けてしまう。
+   */
+  destroy(): void {
+    document.removeEventListener("mousedown", this.onDocMouseDown);
+    document.removeEventListener("mousemove", this.onDocMouseMove);
+    document.removeEventListener("mouseup",   this.onDocMouseUp);
+    this.el.remove();
   }
 
   // ─── ドラッグ移動 ───

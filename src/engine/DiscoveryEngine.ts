@@ -9,7 +9,7 @@
 // これにより探索が高速化され、また YAML パースエラーの心配もなくなる。
 // ============================================================
 
-import { App, CachedMetadata, TFile } from "obsidian";
+import { App, CachedMetadata, TFile, normalizePath } from "obsidian";
 import { TimelineParser, NTJP_KEYS } from "../parser/TimelineParser";
 import { TimelineEvent } from "../types/TimelineTypes";
 import { CalendarSettings } from "../types/TimelineTypes";
@@ -33,7 +33,7 @@ export class DiscoveryEngine {
   constructor(app: App, calendar: CalendarSettings, excludedFolders: string[] = []) {
     this.app = app;
     this.parser = new TimelineParser(calendar);
-    this.excludedFolders = excludedFolders;
+    this.excludedFolders = DiscoveryEngine.normalizeFolders(excludedFolders);
   }
 
   updateCalendar(calendar: CalendarSettings): void {
@@ -41,7 +41,18 @@ export class DiscoveryEngine {
   }
 
   updateExcludedFolders(folders: string[]): void {
-    this.excludedFolders = folders;
+    this.excludedFolders = DiscoveryEngine.normalizeFolders(folders);
+  }
+
+  /**
+   * data.json を直接編集した場合など、設定タブを経由しない値が
+   * 渡されるケースに備え、ここでも normalizePath() を掛けておく。
+   */
+  private static normalizeFolders(folders: string[]): string[] {
+    return folders
+      .map((f) => f.trim())
+      .filter((f) => f !== "")
+      .map((f) => normalizePath(f));
   }
 
   // ----------------------------------------------------------

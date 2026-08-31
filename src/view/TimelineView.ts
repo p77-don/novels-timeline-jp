@@ -469,7 +469,12 @@ export class TimelineView extends ItemView {
     });
 
     // パネル外クリックで閉じる
-    document.addEventListener("click", (e) => {
+    // registerDomEvent() を使うことで、ビューが閉じられた際に
+    // Obsidian 側で自動的にリスナーが解除される
+    // （buildFilterPanel は人物/場所の2回呼ばれるため、生の
+    // document.addEventListener だとビューを開閉するたびに
+    // リスナーが蓄積してしまう）。
+    this.registerDomEvent(document, "click", (e) => {
       if (!wrapper.contains(e.target as Node)) closePanel();
     });
   }
