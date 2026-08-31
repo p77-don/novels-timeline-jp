@@ -143,11 +143,9 @@ export class TimelineView extends ItemView {
     this.applyBoardZoom();
 
     this.tableContainerEl = root.createDiv({ cls: "ntj-table-container" });
-    this.tableContainerEl.style.display = "none";
     this.tableView = new TableView(this.tableContainerEl);
 
     this.debugOverlay = this.timelineEl.createDiv({ cls: "ntj-debug-overlay" });
-    this.debugOverlay.style.display = "none";
 
     // スクロール → 再描画（仮想描画更新 + ルーラー位置更新）
     this.timelineEl.addEventListener("scroll", () => this.scheduleRender());
@@ -200,6 +198,8 @@ export class TimelineView extends ItemView {
   /** 現在の設定値を zoomWrapperEl に反映する */
   private applyBoardZoom(): void {
     const zoom = this.plugin.settings.boardZoom;
+    // 50%〜300%の連続値（ユーザー設定/スライダー由来）のため、
+    // 固定のCSSクラスでは表現できない。インラインスタイルによる指定を許容する。
     this.zoomWrapperEl.style.zoom = `${zoom / 100}`;
     if (this.zoomIndicatorEl) this.zoomIndicatorEl.textContent = `${zoom}%`;
   }
@@ -259,7 +259,7 @@ export class TimelineView extends ItemView {
         scrollLeft: el.scrollLeft,
         scrollTop:  el.scrollTop,
       };
-      el.style.cursor = "grabbing";
+      el.toggleClass("is-panning", true);
     });
 
     el.addEventListener("mousemove", (e: MouseEvent) => {
@@ -273,7 +273,7 @@ export class TimelineView extends ItemView {
     const endPan = () => {
       if (!this.pan.active) return;
       this.pan.active = false;
-      el.style.cursor = "";
+      el.toggleClass("is-panning", false);
     };
 
     el.addEventListener("mouseup",    endPan);
@@ -290,15 +290,14 @@ export class TimelineView extends ItemView {
     });
     this.searchInput.addEventListener("input", () => {
       this.filterState.searchQuery = this.searchInput.value;
-      clearBtn.style.display = this.searchInput.value ? "block" : "none";
+      clearBtn.toggleClass("is-visible", !!this.searchInput.value);
       this.scheduleRender();
     });
     const clearBtn = searchWrapper.createEl("button", { cls: "ntj-search-clear", text: "✕" });
-    clearBtn.style.display = "none";
     clearBtn.addEventListener("click", () => {
       this.searchInput.value = "";
       this.filterState.searchQuery = "";
-      clearBtn.style.display = "none";
+      clearBtn.toggleClass("is-visible", false);
       this.scheduleRender();
       this.searchInput.focus();
     });
@@ -346,7 +345,6 @@ export class TimelineView extends ItemView {
     });
 
     const zoomPanel = zoomWrapper.createDiv({ cls: "ntj-zoom-panel" });
-    zoomPanel.style.display = "none";
 
     const zoomSlider = zoomPanel.createEl("input", { cls: "ntj-zoom-slider" });
     zoomSlider.type  = "range";
@@ -383,11 +381,11 @@ export class TimelineView extends ItemView {
       zoomPanelOpen = true;
       zoomSlider.value = String(this.plugin.settings.boardZoom);
       zoomValueLabel.textContent = `${this.plugin.settings.boardZoom}%`;
-      zoomPanel.style.display = "flex";
+      zoomPanel.toggleClass("is-visible", true);
     };
     const closeZoomPanel = (): void => {
       zoomPanelOpen = false;
-      zoomPanel.style.display = "none";
+      zoomPanel.toggleClass("is-visible", false);
     };
 
     this.zoomIndicatorEl.addEventListener("click", (e) => {
@@ -414,7 +412,6 @@ export class TimelineView extends ItemView {
     const btn = wrapper.createEl("button", { cls: `ntj-btn ${cls}`, text: label });
 
     const panel = wrapper.createDiv({ cls: "ntj-filter-panel" });
-    panel.style.display = "none";
 
     let isOpen = false;
 
@@ -458,12 +455,12 @@ export class TimelineView extends ItemView {
         });
       }
 
-      panel.style.display = "block";
+      panel.toggleClass("is-visible", true);
     };
 
     const closePanel = () => {
       isOpen = false;
-      panel.style.display = "none";
+      panel.toggleClass("is-visible", false);
     };
 
     btn.addEventListener("click", (e) => {
@@ -647,17 +644,22 @@ export class TimelineView extends ItemView {
     renderMs:   number
   ): void {
     const isDebug = this.plugin.settings.debugMode;
-    this.debugOverlay.style.display = isDebug ? "block" : "none";
+    this.debugOverlay.toggleClass("is-visible", isDebug);
     if (!isDebug) return;
 
-    this.debugOverlay.innerHTML = [
+    const lines = [
       `events:  ${eventCount}`,
       `nodes:   ${nodeCount}`,
       `gaps:    ${gapCount}`,
       `render:  ${renderMs.toFixed(1)}ms`,
       `scroll:  ${this.timelineEl.scrollTop.toFixed(0)}px`,
       `zoom:    ${this.plugin.settings.boardZoom}%`,
-    ].join("<br>");
+    ];
+
+    this.debugOverlay.empty();
+    for (const line of lines) {
+      this.debugOverlay.createDiv({ text: line });
+    }
   }
 
   // ----------------------------------------------------------
@@ -667,15 +669,15 @@ export class TimelineView extends ItemView {
   private toggleViewMode(): void {
     if (this.viewMode === "timeline") {
       this.viewMode = "table";
-      this.timelineEl.style.display       = "none";
-      this.tableContainerEl.style.display = "flex";
-      this.viewModeBtn.textContent        = "タイムライン表示";
+      this.timelineEl.toggleClass("is-hidden", true);
+      this.tableContainerEl.toggleClass("is-visible", true);
+      this.viewModeBtn.textContent = "タイムライン表示";
       this.viewModeBtn.addClass("is-active");
     } else {
       this.viewMode = "timeline";
-      this.timelineEl.style.display       = "";
-      this.tableContainerEl.style.display = "none";
-      this.viewModeBtn.textContent        = "一覧表示";
+      this.timelineEl.toggleClass("is-hidden", false);
+      this.tableContainerEl.toggleClass("is-visible", false);
+      this.viewModeBtn.textContent = "一覧表示";
       this.viewModeBtn.removeClass("is-active");
     }
   }

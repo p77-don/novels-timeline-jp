@@ -25,7 +25,6 @@ export class GapRenderer {
   render(gap: GapSegment, axisY: number, gapRowH: number, slotWidth: number): SVGGElement {
     const g = document.createElementNS(SVG_NS, "g") as SVGGElement;
     g.setAttribute("class", "ntj-gap");
-    g.style.cursor = "pointer";
 
     const x         = gap.y; // gap.y は実体としてSVG X座標
     const cardY      = axisY + gapRowH / 2 + 4; // GAP行の中央よりやや下（ノード寄り）

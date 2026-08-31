@@ -86,6 +86,16 @@
   cursor: crosshair;
 }
 
+/* ドラッグパン中 */
+.ntj-timeline.is-panning {
+  cursor: grabbing;
+}
+
+/* 一覧表示（テーブルビュー）へ切り替えた際に非表示にする */
+.ntj-timeline.is-hidden {
+  display: none;
+}
+
 /* ------------------------------------------------------------
    ボードズームラッパー
    タイムラインボード全体（SVG）を CSS zoom で拡大縮小する対象。
@@ -108,7 +118,12 @@
    ------------------------------------------------------------ */
 
 .ntj-node {
+  cursor: grab;
   transition: opacity 0.15s ease;
+}
+
+.ntj-node-label {
+  pointer-events: none;
 }
 
 .ntj-node:hover rect,
@@ -128,6 +143,7 @@
    ------------------------------------------------------------ */
 
 .ntj-tooltip {
+  display: none;
   position: fixed;
   z-index: 9999;
   background-color: var(--background-secondary);
@@ -140,6 +156,14 @@
   pointer-events: none;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.ntj-tooltip.is-visible {
+  display: block;
+}
+
+.ntj-tooltip-summary-text {
+  white-space: pre-wrap;
 }
 
 .ntj-tooltip-title {
@@ -169,6 +193,7 @@
    ------------------------------------------------------------ */
 
 .ntj-popover {
+  display: none;
   position: fixed;
   z-index: 9998;
   background-color: var(--background-primary);
@@ -183,12 +208,25 @@
   overflow: hidden;
 }
 
+.ntj-popover.is-visible {
+  display: block;
+}
+
+.ntj-popover-row-value {
+  white-space: pre-wrap;
+}
+
 .ntj-popover-title {
   font-weight: 600;
   font-size: 14px;
   padding: 12px 16px 10px;
   background-color: var(--background-secondary);
   color: var(--text-normal);
+  cursor: grab;
+}
+
+.ntj-popover-title.is-dragging {
+  cursor: grabbing;
 }
 
 .ntj-popover-divider {
@@ -238,6 +276,7 @@
    ------------------------------------------------------------ */
 
 .ntj-gap {
+  cursor: pointer;
   opacity: 0.85;
   transition: opacity 0.15s ease;
 }
@@ -293,6 +332,14 @@
   border-color: var(--interactive-accent);
 }
 
+.ntj-calendar-month-name-input {
+  width: 80px;
+}
+
+.ntj-calendar-month-days-input {
+  width: 60px;
+}
+
 .ntj-calendar-table button {
   padding: 2px 7px;
   border: 1px solid var(--background-modifier-border);
@@ -314,6 +361,7 @@
    ------------------------------------------------------------ */
 
 .ntj-debug-overlay {
+  display: none;
   position: absolute;
   top: 8px;
   right: 8px;
@@ -326,6 +374,10 @@
   pointer-events: none;
   z-index: 100;
   line-height: 1.8;
+}
+
+.ntj-debug-overlay.is-visible {
+  display: block;
 }
 
 /* ============================================================
@@ -360,6 +412,10 @@
   border-right: 1px solid var(--background-modifier-border);
   overflow-y: auto;
   flex-shrink: 0;
+}
+
+.ntj-side-panel.is-visible {
+  display: flex;
 }
 
 /* パネルヘッダー */
@@ -810,6 +866,7 @@
 }
 
 .ntj-search-clear {
+  display: none;
   position: absolute;
   right: 4px;
   background: none;
@@ -822,6 +879,10 @@
   line-height: 1;
 }
 
+.ntj-search-clear.is-visible {
+  display: block;
+}
+
 .ntj-search-clear:hover {
   color: var(--text-normal);
   background-color: var(--background-modifier-hover);
@@ -832,6 +893,7 @@
   position: relative;
 }
 .ntj-filter-panel {
+  display: none;
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
@@ -844,6 +906,10 @@
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.2);
   padding: 6px 0;
+}
+
+.ntj-filter-panel.is-visible {
+  display: block;
 }
 
 .ntj-filter-item {
@@ -883,11 +949,11 @@
 }
 
 .ntj-zoom-panel {
+  display: none;
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
   z-index: 9990;
-  display: flex;
   align-items: center;
   gap: 8px;
   min-width: 200px;
@@ -896,6 +962,10 @@
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.2);
   padding: 8px 10px;
+}
+
+.ntj-zoom-panel.is-visible {
+  display: flex;
 }
 
 .ntj-zoom-slider {
@@ -933,9 +1003,13 @@
   flex: 1;
   overflow: auto;
   padding: 16px;
-  display: flex;
+  display: none;
   flex-direction: column;
   background-color: var(--background-primary);
+}
+
+.ntj-table-container.is-visible {
+  display: flex;
 }
 
 .ntj-table-wrapper {

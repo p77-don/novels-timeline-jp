@@ -30,8 +30,7 @@ export default class NovelsTimelinePlugin extends Plugin {
       (leaf: WorkspaceLeaf) => new EventSidebarView(leaf, this)
     );
 
-    // リボンアイコン（カスタムSVG）
-    // addRibbonIcon が返す要素の innerHTML を差し替えて独自アイコンを設定する
+    // リボンアイコン（lucideの標準アイコン "waypoints" を使用）
     const ribbonEl = this.addRibbonIcon("waypoints", "Novels Timeline JP", () => {
       this.activateView();
     });
@@ -58,7 +57,10 @@ export default class NovelsTimelinePlugin extends Plugin {
   }
 
   onunload(): void {
-    this.app.workspace.detachLeavesOfType(TIMELINE_VIEW_TYPE);
+    // 注意: onunload() 内で detachLeavesOfType() を呼び出さないこと。
+    // 呼び出すと、プラグイン更新時にユーザーが配置していたリーフの位置情報が
+    // 失われ、再度読み込まれた際に元の位置へ復元されなくなる。
+    // リーフの後始末は Obsidian 側（registerView経由）に委ねる。
   }
 
   // ----------------------------------------------------------

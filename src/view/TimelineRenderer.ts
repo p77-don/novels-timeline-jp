@@ -113,6 +113,8 @@ export class TimelineRenderer {
     this.svg.setAttribute("viewBox", `0 0 ${totalWidth} ${svgHeight}`);
     this.svg.setAttribute("width",   String(totalWidth));
     this.svg.setAttribute("height",  String(svgHeight));
+    // イベント数・レーン幅から毎回計算するボード全体の幅（動的な値）のため、
+    // CSSクラス化はできずインライン指定を許容する。
     this.svg.style.minWidth = `${totalWidth}px`;
 
     while (this.svg.firstChild) this.svg.removeChild(this.svg.firstChild);
@@ -566,7 +568,6 @@ export class TimelineRenderer {
   ): void {
     const g = document.createElementNS(SVG_NS, "g");
     g.setAttribute("class", "ntj-node");
-    g.style.cursor = "grab";
 
     const text     = this.dayLabel(node);
     const fontSize = this.estimateFontSize(node);
@@ -588,6 +589,7 @@ export class TimelineRenderer {
 
     if (!isFiltered) {
       const label = document.createElementNS(SVG_NS, "text");
+      label.setAttribute("class",             "ntj-node-label");
       label.setAttribute("x",                 String(centerX));
       label.setAttribute("y",                 String(node.y));
       label.setAttribute("text-anchor",       "middle");
@@ -595,7 +597,6 @@ export class TimelineRenderer {
       label.setAttribute("font-size",         String(fontSize));
       label.setAttribute("font-weight",       "600");
       label.setAttribute("fill",              colors.textColor || COLOR.nodeTextLight);
-      label.style.pointerEvents = "none";
       label.textContent = text;
       g.appendChild(label);
     }
@@ -770,7 +771,7 @@ export class TimelineRenderer {
       circle:       g,
       originalLane: node.event.lane,
     };
-    g.style.cursor = "grabbing";
+    g.addClass("is-dragging");
   }
 
   private onDragMove(e: MouseEvent, _ctx: RenderContext): void {
@@ -795,7 +796,7 @@ export class TimelineRenderer {
     ctx.onLaneDrop(this.dragState.eventId, targetLane);
 
     if (this.dragState.circle) {
-      this.dragState.circle.style.cursor = "grab";
+      this.dragState.circle.removeClass("is-dragging");
       this.dragState.circle.removeAttribute("transform");
     }
     this.dragState.active = false;

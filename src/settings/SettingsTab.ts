@@ -22,9 +22,8 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     // ========================================================
-    // General
+    // General（先頭セクションのため見出しは付けない）
     // ========================================================
-    containerEl.createEl("h2", { text: "General" });
 
     new Setting(containerEl)
       .setName("新規イベントの保存先フォルダ")
@@ -40,7 +39,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Excluded Folders")
+      .setName("Excluded folders")
       .setDesc("タイムライン探索から除外するフォルダ（カンマ区切り）")
       .addText((text) =>
         text
@@ -59,10 +58,10 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
     // ========================================================
     // Display
     // ========================================================
-    containerEl.createEl("h2", { text: "Display" });
+    new Setting(containerEl).setName("Display").setHeading();
 
     new Setting(containerEl)
-      .setName("Board Zoom")
+      .setName("Board zoom")
       .setDesc(
         `タイムラインボードの拡大率（${BOARD_ZOOM_MIN}〜${BOARD_ZOOM_MAX}%）。` +
         "タイムライン上で Shift+ホイールでも変更できます。"
@@ -107,10 +106,10 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
     // ========================================================
     // Relation
     // ========================================================
-    containerEl.createEl("h2", { text: "Relation" });
+    new Setting(containerEl).setName("Relation").setHeading();
 
     new Setting(containerEl)
-      .setName("Relation Color")
+      .setName("Relation color")
       .setDesc("関係線の色")
       .addColorPicker((picker) =>
         picker
@@ -123,7 +122,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Relation Style")
+      .setName("Relation style")
       .addDropdown((dd) =>
         dd
           .addOption("solid",  "Solid")
@@ -138,7 +137,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Relation Width")
+      .setName("Relation width")
       .setDesc("関係線の太さ（1〜6px）")
       .addSlider((slider) =>
         slider
@@ -153,7 +152,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Relation Arrow Style")
+      .setName("Relation arrow style")
       .addDropdown((dd) =>
         dd
           .addOption("none",     "None")
@@ -168,7 +167,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Relation Opacity")
+      .setName("Relation opacity")
       .setDesc("透明度（10〜100%）")
       .addSlider((slider) =>
         slider
@@ -183,7 +182,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Relation Curve Strength")
+      .setName("Relation curve strength")
       .setDesc("ベジェ曲率（0〜100）")
       .addSlider((slider) =>
         slider
@@ -200,10 +199,10 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
     // ========================================================
     // Timeline
     // ========================================================
-    containerEl.createEl("h2", { text: "Timeline" });
+    new Setting(containerEl).setName("Timeline").setHeading();
 
     new Setting(containerEl)
-      .setName("Gap Compression")
+      .setName("Gap compression")
       .setDesc("長期間の空白を圧縮表示する")
       .addToggle((toggle) =>
         toggle
@@ -216,7 +215,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Gap Threshold")
+      .setName("Gap threshold")
       .setDesc(`Gap生成条件（日数相当値、${GAP_THRESHOLD_MIN}〜${GAP_THRESHOLD_MAX}）。イベント間隔がこの値以上の場合にGapとして圧縮表示する。`)
       .addSlider((slider) =>
         slider
@@ -242,9 +241,9 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
       );
 
     // ========================================================
-    // Calendar（C. 暦設定）
+    // Calendar（暦設定）
     // ========================================================
-    containerEl.createEl("h2", { text: "Calendar（暦設定）" });
+    new Setting(containerEl).setName("Calendar（暦設定）").setHeading();
     containerEl.createEl("p", {
       text: "物語世界の暦を定義します。月数・月名・各月の日数を設定してください。",
       cls: "setting-item-description",
@@ -301,10 +300,10 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
     // ========================================================
     // Advanced
     // ========================================================
-    containerEl.createEl("h2", { text: "Advanced" });
+    new Setting(containerEl).setName("Advanced").setHeading();
 
     new Setting(containerEl)
-      .setName("Virtual Rendering")
+      .setName("Virtual rendering")
       .setDesc("仮想描画（表示範囲外のノードを描画しない）")
       .addToggle((toggle) =>
         toggle
@@ -317,7 +316,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Render Buffer")
+      .setName("Render buffer")
       .setDesc("先読み描画範囲（px）")
       .addText((text) =>
         text
@@ -333,7 +332,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Rebuild Cache")
+      .setName("Rebuild cache")
       .setDesc("キャッシュを削除して全再解析する")
       .addButton((btn) =>
         btn.setButtonText("再構築").onClick(async () => {
@@ -386,10 +385,9 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
 
     // 月名
     const nameTd = tr.createEl("td");
-    const nameInput = nameTd.createEl("input", { type: "text" });
+    const nameInput = nameTd.createEl("input", { type: "text", cls: "ntj-calendar-month-name-input" });
     nameInput.value = month.name;
     nameInput.placeholder = "例：五月";
-    nameInput.style.width = "80px";
     nameInput.addEventListener("change", async () => {
       months[index].name = nameInput.value;
       await this.plugin.saveSettings();
@@ -398,11 +396,10 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
 
     // 日数
     const daysTd = tr.createEl("td");
-    const daysInput = daysTd.createEl("input", { type: "number" });
+    const daysInput = daysTd.createEl("input", { type: "number", cls: "ntj-calendar-month-days-input" });
     daysInput.value = String(month.days);
     daysInput.min = "1";
     daysInput.max = "999";
-    daysInput.style.width = "60px";
     daysInput.addEventListener("change", async () => {
       const n = parseInt(daysInput.value, 10);
       if (Number.isFinite(n) && n >= 1) {

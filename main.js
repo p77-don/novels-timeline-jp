@@ -2657,10 +2657,6 @@ var FilterEngine = class {
 var Tooltip = class {
   constructor(_container) {
     this.el = document.body.createDiv({ cls: "ntj-tooltip" });
-    this.el.style.display = "none";
-    this.el.style.position = "fixed";
-    this.el.style.zIndex = "99999";
-    this.el.style.pointerEvents = "none";
   }
   show(event, nodeColor, mouseX, mouseY) {
     this.el.empty();
@@ -2682,22 +2678,22 @@ var Tooltip = class {
     if (event.summary) {
       const row = this.el.createEl("div", { cls: "ntj-tooltip-row ntj-tooltip-summary" });
       row.createSpan({ cls: "ntj-tooltip-icon", text: "\u{1F4DD}" });
-      const summarySpan = row.createSpan({
+      row.createSpan({
+        cls: "ntj-tooltip-summary-text",
         text: event.summary.replace(/_LineBreak_/g, "\n")
       });
-      summarySpan.style.whiteSpace = "pre-wrap";
     }
     this.el.style.left = `${mouseX}px`;
     this.el.style.top = `${mouseY}px`;
-    this.el.style.display = "block";
+    this.el.toggleClass("is-visible", true);
   }
   move(mouseX, mouseY) {
-    if (this.el.style.display === "none") return;
+    if (!this.el.hasClass("is-visible")) return;
     this.el.style.left = `${mouseX}px`;
     this.el.style.top = `${mouseY}px`;
   }
   hide() {
-    this.el.style.display = "none";
+    this.el.toggleClass("is-visible", false);
   }
   /** プラグインアンロード時に DOM を片付ける */
   destroy() {
@@ -2724,7 +2720,6 @@ var GapRenderer = class {
   render(gap, axisY, gapRowH, slotWidth) {
     const g = document.createElementNS(SVG_NS, "g");
     g.setAttribute("class", "ntj-gap");
-    g.style.cursor = "pointer";
     const x = gap.y;
     const cardY = axisY + gapRowH / 2 + 4;
     const labelText = gap.expanded ? `\u25B2 ${gap.label}` : `\u25BC ${gap.label}`;
@@ -3201,7 +3196,6 @@ var TimelineRenderer = class {
   drawNode(node, isFiltered, isSelected, ctx) {
     const g = document.createElementNS(SVG_NS2, "g");
     g.setAttribute("class", "ntj-node");
-    g.style.cursor = "grab";
     const text = this.dayLabel(node);
     const fontSize = this.estimateFontSize(node);
     const halfH = node.radius;
@@ -3223,6 +3217,7 @@ var TimelineRenderer = class {
     g.appendChild(shape);
     if (!isFiltered) {
       const label = document.createElementNS(SVG_NS2, "text");
+      label.setAttribute("class", "ntj-node-label");
       label.setAttribute("x", String(centerX));
       label.setAttribute("y", String(node.y));
       label.setAttribute("text-anchor", "middle");
@@ -3230,7 +3225,6 @@ var TimelineRenderer = class {
       label.setAttribute("font-size", String(fontSize));
       label.setAttribute("font-weight", "600");
       label.setAttribute("fill", colors.textColor || COLOR.nodeTextLight);
-      label.style.pointerEvents = "none";
       label.textContent = text;
       g.appendChild(label);
     }
@@ -3367,7 +3361,7 @@ var TimelineRenderer = class {
       circle: g,
       originalLane: node.event.lane
     };
-    g.style.cursor = "grabbing";
+    g.addClass("is-dragging");
   }
   onDragMove(e, _ctx) {
     if (!this.dragState.active || !this.dragState.circle) return;
@@ -3386,7 +3380,7 @@ var TimelineRenderer = class {
     const targetLane = this.svgYToLane(droppedY, this._lastLanesStartY);
     ctx.onLaneDrop(this.dragState.eventId, targetLane);
     if (this.dragState.circle) {
-      this.dragState.circle.style.cursor = "grab";
+      this.dragState.circle.removeClass("is-dragging");
       this.dragState.circle.removeAttribute("transform");
     }
     this.dragState.active = false;
@@ -3634,10 +3628,8 @@ var TimelineView = class extends import_obsidian2.ItemView {
     this.renderer = new TimelineRenderer(this.zoomWrapperEl);
     this.applyBoardZoom();
     this.tableContainerEl = root.createDiv({ cls: "ntj-table-container" });
-    this.tableContainerEl.style.display = "none";
     this.tableView = new TableView(this.tableContainerEl);
     this.debugOverlay = this.timelineEl.createDiv({ cls: "ntj-debug-overlay" });
-    this.debugOverlay.style.display = "none";
     this.timelineEl.addEventListener("scroll", () => this.scheduleRender());
     this.timelineEl.addEventListener("dblclick", (e) => {
       const target = e.target;
@@ -3721,7 +3713,7 @@ var TimelineView = class extends import_obsidian2.ItemView {
         scrollLeft: el.scrollLeft,
         scrollTop: el.scrollTop
       };
-      el.style.cursor = "grabbing";
+      el.toggleClass("is-panning", true);
     });
     el.addEventListener("mousemove", (e) => {
       if (!this.pan.active) return;
@@ -3733,7 +3725,7 @@ var TimelineView = class extends import_obsidian2.ItemView {
     const endPan = () => {
       if (!this.pan.active) return;
       this.pan.active = false;
-      el.style.cursor = "";
+      el.toggleClass("is-panning", false);
     };
     el.addEventListener("mouseup", endPan);
     el.addEventListener("mouseleave", endPan);
@@ -3748,15 +3740,14 @@ var TimelineView = class extends import_obsidian2.ItemView {
     });
     this.searchInput.addEventListener("input", () => {
       this.filterState.searchQuery = this.searchInput.value;
-      clearBtn.style.display = this.searchInput.value ? "block" : "none";
+      clearBtn.toggleClass("is-visible", !!this.searchInput.value);
       this.scheduleRender();
     });
     const clearBtn = searchWrapper.createEl("button", { cls: "ntj-search-clear", text: "\u2715" });
-    clearBtn.style.display = "none";
     clearBtn.addEventListener("click", () => {
       this.searchInput.value = "";
       this.filterState.searchQuery = "";
-      clearBtn.style.display = "none";
+      clearBtn.toggleClass("is-visible", false);
       this.scheduleRender();
       this.searchInput.focus();
     });
@@ -3795,7 +3786,6 @@ var TimelineView = class extends import_obsidian2.ItemView {
 \u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u4E0A\u3067 Shift+\u30DB\u30A4\u30FC\u30EB\u3067\u3082\u5909\u66F4\u3067\u304D\u307E\u3059`
     });
     const zoomPanel = zoomWrapper.createDiv({ cls: "ntj-zoom-panel" });
-    zoomPanel.style.display = "none";
     const zoomSlider = zoomPanel.createEl("input", { cls: "ntj-zoom-slider" });
     zoomSlider.type = "range";
     zoomSlider.min = String(BOARD_ZOOM_MIN);
@@ -3826,11 +3816,11 @@ var TimelineView = class extends import_obsidian2.ItemView {
       zoomPanelOpen = true;
       zoomSlider.value = String(this.plugin.settings.boardZoom);
       zoomValueLabel.textContent = `${this.plugin.settings.boardZoom}%`;
-      zoomPanel.style.display = "flex";
+      zoomPanel.toggleClass("is-visible", true);
     };
     const closeZoomPanel = () => {
       zoomPanelOpen = false;
-      zoomPanel.style.display = "none";
+      zoomPanel.toggleClass("is-visible", false);
     };
     this.zoomIndicatorEl.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -3849,7 +3839,6 @@ var TimelineView = class extends import_obsidian2.ItemView {
     const wrapper = this.toolbarEl.createDiv({ cls: "ntj-filter-wrapper" });
     const btn = wrapper.createEl("button", { cls: `ntj-btn ${cls}`, text: label });
     const panel = wrapper.createDiv({ cls: "ntj-filter-panel" });
-    panel.style.display = "none";
     let isOpen = false;
     const openPanel = () => {
       isOpen = true;
@@ -3885,11 +3874,11 @@ var TimelineView = class extends import_obsidian2.ItemView {
           openPanel();
         });
       }
-      panel.style.display = "block";
+      panel.toggleClass("is-visible", true);
     };
     const closePanel = () => {
       isOpen = false;
-      panel.style.display = "none";
+      panel.toggleClass("is-visible", false);
     };
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -4031,16 +4020,20 @@ var TimelineView = class extends import_obsidian2.ItemView {
   // ----------------------------------------------------------
   updateDebugOverlay(eventCount, nodeCount, gapCount, renderMs) {
     const isDebug = this.plugin.settings.debugMode;
-    this.debugOverlay.style.display = isDebug ? "block" : "none";
+    this.debugOverlay.toggleClass("is-visible", isDebug);
     if (!isDebug) return;
-    this.debugOverlay.innerHTML = [
+    const lines = [
       `events:  ${eventCount}`,
       `nodes:   ${nodeCount}`,
       `gaps:    ${gapCount}`,
       `render:  ${renderMs.toFixed(1)}ms`,
       `scroll:  ${this.timelineEl.scrollTop.toFixed(0)}px`,
       `zoom:    ${this.plugin.settings.boardZoom}%`
-    ].join("<br>");
+    ];
+    this.debugOverlay.empty();
+    for (const line of lines) {
+      this.debugOverlay.createDiv({ text: line });
+    }
   }
   // ----------------------------------------------------------
   // ビューモード切替（タイムライン ↔ テーブル）
@@ -4048,14 +4041,14 @@ var TimelineView = class extends import_obsidian2.ItemView {
   toggleViewMode() {
     if (this.viewMode === "timeline") {
       this.viewMode = "table";
-      this.timelineEl.style.display = "none";
-      this.tableContainerEl.style.display = "flex";
+      this.timelineEl.toggleClass("is-hidden", true);
+      this.tableContainerEl.toggleClass("is-visible", true);
       this.viewModeBtn.textContent = "\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u8868\u793A";
       this.viewModeBtn.addClass("is-active");
     } else {
       this.viewMode = "timeline";
-      this.timelineEl.style.display = "";
-      this.tableContainerEl.style.display = "none";
+      this.timelineEl.toggleClass("is-hidden", false);
+      this.tableContainerEl.toggleClass("is-visible", false);
       this.viewModeBtn.textContent = "\u4E00\u89A7\u8868\u793A";
       this.viewModeBtn.removeClass("is-active");
     }
@@ -5170,22 +5163,21 @@ var NovelsTimelineSettingTab = class extends import_obsidian5.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "General" });
     new import_obsidian5.Setting(containerEl).setName("\u65B0\u898F\u30A4\u30D9\u30F3\u30C8\u306E\u4FDD\u5B58\u5148\u30D5\u30A9\u30EB\u30C0").setDesc("\u53F3\u30AF\u30EA\u30C3\u30AF\u3067\u4F5C\u6210\u3059\u308B\u30A4\u30D9\u30F3\u30C8\u30CE\u30FC\u30C8\u306E\u4FDD\u5B58\u5148\uFF08\u7A7A\u306E\u5834\u5408\u306F Vault \u30EB\u30FC\u30C8\uFF09").addText(
       (text) => text.setPlaceholder("\u4F8B: events / stories/chapter1").setValue(this.plugin.settings.newEventFolder).onChange(async (value) => {
         this.plugin.settings.newEventFolder = value.trim().replace(/\/$/, "");
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("Excluded Folders").setDesc("\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u63A2\u7D22\u304B\u3089\u9664\u5916\u3059\u308B\u30D5\u30A9\u30EB\u30C0\uFF08\u30AB\u30F3\u30DE\u533A\u5207\u308A\uFF09").addText(
+    new import_obsidian5.Setting(containerEl).setName("Excluded folders").setDesc("\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u63A2\u7D22\u304B\u3089\u9664\u5916\u3059\u308B\u30D5\u30A9\u30EB\u30C0\uFF08\u30AB\u30F3\u30DE\u533A\u5207\u308A\uFF09").addText(
       (text) => text.setPlaceholder("Templates, Archive, Trash").setValue(this.plugin.settings.excludedFolders.join(", ")).onChange(async (value) => {
         this.plugin.settings.excludedFolders = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
         await this.plugin.saveSettings();
         this.plugin.notifySettingsChanged();
       })
     );
-    containerEl.createEl("h2", { text: "Display" });
-    new import_obsidian5.Setting(containerEl).setName("Board Zoom").setDesc(
+    new import_obsidian5.Setting(containerEl).setName("Display").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Board zoom").setDesc(
       `\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u30DC\u30FC\u30C9\u306E\u62E1\u5927\u7387\uFF08${BOARD_ZOOM_MIN}\u301C${BOARD_ZOOM_MAX}%\uFF09\u3002\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u4E0A\u3067 Shift+\u30DB\u30A4\u30FC\u30EB\u3067\u3082\u5909\u66F4\u3067\u304D\u307E\u3059\u3002`
     ).addSlider(
       (slider) => slider.setLimits(BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, 10).setValue(this.plugin.settings.boardZoom).setDynamicTooltip().onChange(async (value) => {
@@ -5207,58 +5199,58 @@ var NovelsTimelineSettingTab = class extends import_obsidian5.PluginSettingTab {
         }).open();
       })
     );
-    containerEl.createEl("h2", { text: "Relation" });
-    new import_obsidian5.Setting(containerEl).setName("Relation Color").setDesc("\u95A2\u4FC2\u7DDA\u306E\u8272").addColorPicker(
+    new import_obsidian5.Setting(containerEl).setName("Relation").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Relation color").setDesc("\u95A2\u4FC2\u7DDA\u306E\u8272").addColorPicker(
       (picker) => picker.setValue(this.plugin.settings.relationColor).onChange(async (value) => {
         this.plugin.settings.relationColor = value;
         await this.plugin.saveSettings();
         this.plugin.notifySettingsChanged();
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("Relation Style").addDropdown(
+    new import_obsidian5.Setting(containerEl).setName("Relation style").addDropdown(
       (dd) => dd.addOption("solid", "Solid").addOption("dashed", "Dashed").addOption("dotted", "Dotted").setValue(this.plugin.settings.relationStyle).onChange(async (value) => {
         this.plugin.settings.relationStyle = value;
         await this.plugin.saveSettings();
         this.plugin.notifySettingsChanged();
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("Relation Width").setDesc("\u95A2\u4FC2\u7DDA\u306E\u592A\u3055\uFF081\u301C6px\uFF09").addSlider(
+    new import_obsidian5.Setting(containerEl).setName("Relation width").setDesc("\u95A2\u4FC2\u7DDA\u306E\u592A\u3055\uFF081\u301C6px\uFF09").addSlider(
       (slider) => slider.setLimits(1, 6, 1).setValue(this.plugin.settings.relationWidth).setDynamicTooltip().onChange(async (value) => {
         this.plugin.settings.relationWidth = value;
         await this.plugin.saveSettings();
         this.plugin.notifySettingsChanged();
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("Relation Arrow Style").addDropdown(
+    new import_obsidian5.Setting(containerEl).setName("Relation arrow style").addDropdown(
       (dd) => dd.addOption("none", "None").addOption("arrow", "Arrow").addOption("triangle", "Triangle").setValue(this.plugin.settings.relationArrowStyle).onChange(async (value) => {
         this.plugin.settings.relationArrowStyle = value;
         await this.plugin.saveSettings();
         this.plugin.notifySettingsChanged();
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("Relation Opacity").setDesc("\u900F\u660E\u5EA6\uFF0810\u301C100%\uFF09").addSlider(
+    new import_obsidian5.Setting(containerEl).setName("Relation opacity").setDesc("\u900F\u660E\u5EA6\uFF0810\u301C100%\uFF09").addSlider(
       (slider) => slider.setLimits(10, 100, 5).setValue(Math.round(this.plugin.settings.relationOpacity * 100)).setDynamicTooltip().onChange(async (value) => {
         this.plugin.settings.relationOpacity = value / 100;
         await this.plugin.saveSettings();
         this.plugin.notifySettingsChanged();
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("Relation Curve Strength").setDesc("\u30D9\u30B8\u30A7\u66F2\u7387\uFF080\u301C100\uFF09").addSlider(
+    new import_obsidian5.Setting(containerEl).setName("Relation curve strength").setDesc("\u30D9\u30B8\u30A7\u66F2\u7387\uFF080\u301C100\uFF09").addSlider(
       (slider) => slider.setLimits(0, 100, 5).setValue(this.plugin.settings.relationCurveStrength).setDynamicTooltip().onChange(async (value) => {
         this.plugin.settings.relationCurveStrength = value;
         await this.plugin.saveSettings();
         this.plugin.notifySettingsChanged();
       })
     );
-    containerEl.createEl("h2", { text: "Timeline" });
-    new import_obsidian5.Setting(containerEl).setName("Gap Compression").setDesc("\u9577\u671F\u9593\u306E\u7A7A\u767D\u3092\u5727\u7E2E\u8868\u793A\u3059\u308B").addToggle(
+    new import_obsidian5.Setting(containerEl).setName("Timeline").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Gap compression").setDesc("\u9577\u671F\u9593\u306E\u7A7A\u767D\u3092\u5727\u7E2E\u8868\u793A\u3059\u308B").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.gapCompression).onChange(async (value) => {
         this.plugin.settings.gapCompression = value;
         await this.plugin.saveSettings();
         this.plugin.notifySettingsChanged();
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("Gap Threshold").setDesc(`Gap\u751F\u6210\u6761\u4EF6\uFF08\u65E5\u6570\u76F8\u5F53\u5024\u3001${GAP_THRESHOLD_MIN}\u301C${GAP_THRESHOLD_MAX}\uFF09\u3002\u30A4\u30D9\u30F3\u30C8\u9593\u9694\u304C\u3053\u306E\u5024\u4EE5\u4E0A\u306E\u5834\u5408\u306BGap\u3068\u3057\u3066\u5727\u7E2E\u8868\u793A\u3059\u308B\u3002`).addSlider(
+    new import_obsidian5.Setting(containerEl).setName("Gap threshold").setDesc(`Gap\u751F\u6210\u6761\u4EF6\uFF08\u65E5\u6570\u76F8\u5F53\u5024\u3001${GAP_THRESHOLD_MIN}\u301C${GAP_THRESHOLD_MAX}\uFF09\u3002\u30A4\u30D9\u30F3\u30C8\u9593\u9694\u304C\u3053\u306E\u5024\u4EE5\u4E0A\u306E\u5834\u5408\u306BGap\u3068\u3057\u3066\u5727\u7E2E\u8868\u793A\u3059\u308B\u3002`).addSlider(
       (slider) => slider.setLimits(GAP_THRESHOLD_MIN, GAP_THRESHOLD_MAX, GAP_THRESHOLD_STEP).setValue(this.plugin.settings.gapThreshold).setDynamicTooltip().onChange(async (value) => {
         this.plugin.settings.gapThreshold = value;
         await this.plugin.saveSettings();
@@ -5272,7 +5264,7 @@ var NovelsTimelineSettingTab = class extends import_obsidian5.PluginSettingTab {
         this.display();
       })
     );
-    containerEl.createEl("h2", { text: "Calendar\uFF08\u66A6\u8A2D\u5B9A\uFF09" });
+    new import_obsidian5.Setting(containerEl).setName("Calendar\uFF08\u66A6\u8A2D\u5B9A\uFF09").setHeading();
     containerEl.createEl("p", {
       text: "\u7269\u8A9E\u4E16\u754C\u306E\u66A6\u3092\u5B9A\u7FA9\u3057\u307E\u3059\u3002\u6708\u6570\u30FB\u6708\u540D\u30FB\u5404\u6708\u306E\u65E5\u6570\u3092\u8A2D\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
       cls: "setting-item-description"
@@ -5303,15 +5295,15 @@ var NovelsTimelineSettingTab = class extends import_obsidian5.PluginSettingTab {
         this.display();
       })
     );
-    containerEl.createEl("h2", { text: "Advanced" });
-    new import_obsidian5.Setting(containerEl).setName("Virtual Rendering").setDesc("\u4EEE\u60F3\u63CF\u753B\uFF08\u8868\u793A\u7BC4\u56F2\u5916\u306E\u30CE\u30FC\u30C9\u3092\u63CF\u753B\u3057\u306A\u3044\uFF09").addToggle(
+    new import_obsidian5.Setting(containerEl).setName("Advanced").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Virtual rendering").setDesc("\u4EEE\u60F3\u63CF\u753B\uFF08\u8868\u793A\u7BC4\u56F2\u5916\u306E\u30CE\u30FC\u30C9\u3092\u63CF\u753B\u3057\u306A\u3044\uFF09").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.virtualRendering).onChange(async (value) => {
         this.plugin.settings.virtualRendering = value;
         await this.plugin.saveSettings();
         this.plugin.notifySettingsChanged();
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("Render Buffer").setDesc("\u5148\u8AAD\u307F\u63CF\u753B\u7BC4\u56F2\uFF08px\uFF09").addText(
+    new import_obsidian5.Setting(containerEl).setName("Render buffer").setDesc("\u5148\u8AAD\u307F\u63CF\u753B\u7BC4\u56F2\uFF08px\uFF09").addText(
       (text) => text.setValue(String(this.plugin.settings.renderBuffer)).onChange(async (value) => {
         const n = parseInt(value, 10);
         if (Number.isFinite(n) && n >= 0) {
@@ -5321,7 +5313,7 @@ var NovelsTimelineSettingTab = class extends import_obsidian5.PluginSettingTab {
         }
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("Rebuild Cache").setDesc("\u30AD\u30E3\u30C3\u30B7\u30E5\u3092\u524A\u9664\u3057\u3066\u5168\u518D\u89E3\u6790\u3059\u308B").addButton(
+    new import_obsidian5.Setting(containerEl).setName("Rebuild cache").setDesc("\u30AD\u30E3\u30C3\u30B7\u30E5\u3092\u524A\u9664\u3057\u3066\u5168\u518D\u89E3\u6790\u3059\u308B").addButton(
       (btn) => btn.setButtonText("\u518D\u69CB\u7BC9").onClick(async () => {
         const view = this.plugin.getTimelineView();
         if (view) {
@@ -5356,21 +5348,19 @@ var NovelsTimelineSettingTab = class extends import_obsidian5.PluginSettingTab {
     const tr = tbody.createEl("tr");
     tr.createEl("td", { text: String(month.month) });
     const nameTd = tr.createEl("td");
-    const nameInput = nameTd.createEl("input", { type: "text" });
+    const nameInput = nameTd.createEl("input", { type: "text", cls: "ntj-calendar-month-name-input" });
     nameInput.value = month.name;
     nameInput.placeholder = "\u4F8B\uFF1A\u4E94\u6708";
-    nameInput.style.width = "80px";
     nameInput.addEventListener("change", async () => {
       months[index].name = nameInput.value;
       await this.plugin.saveSettings();
       this.plugin.notifySettingsChanged();
     });
     const daysTd = tr.createEl("td");
-    const daysInput = daysTd.createEl("input", { type: "number" });
+    const daysInput = daysTd.createEl("input", { type: "number", cls: "ntj-calendar-month-days-input" });
     daysInput.value = String(month.days);
     daysInput.min = "1";
     daysInput.max = "999";
-    daysInput.style.width = "60px";
     daysInput.addEventListener("change", async () => {
       const n = parseInt(daysInput.value, 10);
       if (Number.isFinite(n) && n >= 1) {
@@ -5429,7 +5419,6 @@ var NovelsTimelinePlugin = class extends import_obsidian6.Plugin {
     this.addSettingTab(new NovelsTimelineSettingTab(this.app, this));
   }
   onunload() {
-    this.app.workspace.detachLeavesOfType(TIMELINE_VIEW_TYPE);
   }
   // ----------------------------------------------------------
   // 設定

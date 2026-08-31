@@ -47,6 +47,7 @@ export class SidePanel {
   private plugin:    NovelsTimelinePlugin;
   private callbacks: SidePanelCallbacks;
   private mode:      SidePanelMode = { type: "idle" };
+  private opened:    boolean = false;
 
   constructor(
     container: HTMLElement,
@@ -57,7 +58,6 @@ export class SidePanel {
     this.callbacks = callbacks;
 
     this.el = container.createDiv({ cls: "ntj-side-panel" });
-    this.el.style.display = "none";
   }
 
   // ----------------------------------------------------------
@@ -67,19 +67,21 @@ export class SidePanel {
   /** パネルを開いて指定モードのUIを表示する */
   open(mode: SidePanelMode): void {
     this.mode = mode;
-    this.el.style.display = "flex";
+    this.opened = true;
+    this.el.toggleClass("is-visible", true);
     this.render();
   }
 
   /** パネルを閉じる */
   close(): void {
     this.mode = { type: "idle" };
-    this.el.style.display = "none";
+    this.opened = false;
+    this.el.toggleClass("is-visible", false);
     this.el.empty();
   }
 
   isOpen(): boolean {
-    return this.el.style.display !== "none";
+    return this.opened;
   }
 
   // ----------------------------------------------------------

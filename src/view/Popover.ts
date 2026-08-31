@@ -22,9 +22,8 @@ export class Popover {
 
   constructor(container: HTMLElement) {
     this.el = container.createDiv({ cls: "ntj-popover" });
-    this.el.style.display  = "none";
-    this.el.style.position = "fixed";
-    this.el.style.zIndex   = "9998";
+    // display / position / z-index は styles.css の
+    // .ntj-popover / .ntj-popover.is-visible で定義する
 
     // 外側クリックで閉じる（Popover自身とそのドラッグ操作は除外）
     document.addEventListener("mousedown", (e) => {
@@ -43,13 +42,13 @@ export class Popover {
 
   show(event: TimelineEvent, anchorX: number, anchorY: number): void {
     this.el.empty();
-    // イベント自身の色を上辺のアクセントとして使う
+    // イベント自身の色を上辺のアクセントとして使う。
+    // イベントごとに異なる動的な色のため、CSSクラス化はできずインライン指定を許容する。
     this.el.style.borderTop = `3px solid ${event.color || "var(--interactive-accent)"}`;
 
     // ─── ヘッダー（ドラッグハンドル） ───
     this.headerEl = this.el.createEl("div", { cls: "ntj-popover-title" });
     this.headerEl.createSpan({ text: event.displayTitle });
-    this.headerEl.style.cursor = "grab";
     this.headerEl.addEventListener("mousedown", (e) => {
       e.preventDefault();
       this.startDrag(e);
@@ -90,9 +89,11 @@ export class Popover {
     }
 
     // 表示してサイズ取得後に位置を確定
-    this.el.style.display = "block";
-    this.el.style.left    = "-9999px";
-    this.el.style.top     = "-9999px";
+    // left/top はサイズ計測前の一時的なオフスクリーン配置であり、
+    // 実際の表示位置は毎回JSで計算する動的な値のためインライン指定を許容する。
+    this.el.toggleClass("is-visible", true);
+    this.el.style.left = "-9999px";
+    this.el.style.top  = "-9999px";
 
     requestAnimationFrame(() => {
       this.positionNearAnchor(anchorX, anchorY);
@@ -115,12 +116,14 @@ export class Popover {
     if (top + rect.height > winH - 8) top = winH - rect.height - 8;
     if (top < 8) top = 8;
 
+    // アンカー位置・ウィンドウサイズから毎回計算する動的な値のため、
+    // CSSクラス化はできずインライン指定を許容する。
     this.el.style.left = `${Math.max(8, left)}px`;
     this.el.style.top  = `${Math.max(8, top)}px`;
   }
 
   hide(): void {
-    this.el.style.display = "none";
+    this.el.toggleClass("is-visible", false);
   }
 
   // ─── ドラッグ移動 ───
@@ -134,7 +137,7 @@ export class Popover {
       startLeft:   rect.left,
       startTop:    rect.top,
     };
-    this.headerEl.style.cursor = "grabbing";
+    this.headerEl.addClass("is-dragging");
   }
 
   private onMouseMove(e: MouseEvent): void {
@@ -148,6 +151,8 @@ export class Popover {
     const newLeft = Math.max(0, Math.min(winW - rect.width,  this.drag.startLeft + dx));
     const newTop  = Math.max(0, Math.min(winH - rect.height, this.drag.startTop  + dy));
 
+    // マウス移動量から毎フレーム計算する動的な値のため、
+    // CSSクラス化はできずインライン指定を許容する。
     this.el.style.left = `${newLeft}px`;
     this.el.style.top  = `${newTop}px`;
   }
@@ -155,7 +160,7 @@ export class Popover {
   private onMouseUp(): void {
     if (!this.drag.active) return;
     this.drag.active = false;
-    if (this.headerEl) this.headerEl.style.cursor = "grab";
+    if (this.headerEl) this.headerEl.removeClass("is-dragging");
   }
 
   // ─── ヘルパー ───
@@ -165,8 +170,7 @@ export class Popover {
     const labelEl = row.createSpan({ cls: "ntj-popover-label" });
     labelEl.createSpan({ cls: "ntj-popover-icon", text: icon });
     labelEl.createSpan({ text: label });
-    const valueEl = row.createSpan({ text: value });
-    valueEl.style.whiteSpace = "pre-wrap";
+    const valueEl = row.createSpan({ cls: "ntj-popover-row-value", text: value });
   }
 
   private addSection(icon: string, label: string, items: string[]): void {

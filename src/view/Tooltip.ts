@@ -13,17 +13,16 @@ export class Tooltip {
 
   constructor(_container: HTMLElement) {
     // body 直下に置くことで fixed 基準が確実に viewport になる
+    // position / z-index / pointer-events / display は styles.css の
+    // .ntj-tooltip / .ntj-tooltip.is-visible で定義する
     this.el = document.body.createDiv({ cls: "ntj-tooltip" });
-    this.el.style.display       = "none";
-    this.el.style.position      = "fixed";
-    this.el.style.zIndex        = "99999";
-    this.el.style.pointerEvents = "none";
   }
 
   show(event: TimelineEvent, nodeColor: string, mouseX: number, mouseY: number): void {
     this.el.empty();
     // イベント自身の色をアクセント帯として使い、
-    // 「どのノードの情報か」を視覚的にも繋げる
+    // 「どのノードの情報か」を視覚的にも繋げる。
+    // イベントごとに異なる動的な色のため、CSSクラス化はできずインライン指定を許容する。
     this.el.style.borderLeft = `3px solid ${nodeColor || "var(--interactive-accent)"}`;
 
     this.el.createEl("div", { cls: "ntj-tooltip-title", text: event.displayTitle });
@@ -50,25 +49,27 @@ export class Tooltip {
       const row = this.el.createEl("div", { cls: "ntj-tooltip-row ntj-tooltip-summary" });
       row.createSpan({ cls: "ntj-tooltip-icon", text: "📝" });
       // _LineBreak_ を \n に戻し、white-space:pre-wrap で改行表示
-      const summarySpan = row.createSpan({
-        text: event.summary.replace(/_LineBreak_/g, "\n")
+      row.createSpan({
+        cls: "ntj-tooltip-summary-text",
+        text: event.summary.replace(/_LineBreak_/g, "\n"),
       });
-      summarySpan.style.whiteSpace = "pre-wrap";
     }
 
-    this.el.style.left    = `${mouseX}px`;
-    this.el.style.top     = `${mouseY}px`;
-    this.el.style.display = "block";
+    // マウス追従の座標はマウス位置から都度計算する動的な値のため、
+    // CSSクラス化はできずインライン指定を許容する。
+    this.el.style.left = `${mouseX}px`;
+    this.el.style.top  = `${mouseY}px`;
+    this.el.toggleClass("is-visible", true);
   }
 
   move(mouseX: number, mouseY: number): void {
-    if (this.el.style.display === "none") return;
+    if (!this.el.hasClass("is-visible")) return;
     this.el.style.left = `${mouseX}px`;
     this.el.style.top  = `${mouseY}px`;
   }
 
   hide(): void {
-    this.el.style.display = "none";
+    this.el.toggleClass("is-visible", false);
   }
 
   /** プラグインアンロード時に DOM を片付ける */
