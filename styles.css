@@ -81,6 +81,11 @@
   cursor: default;
 }
 
+/* ノード間日数計測モード中：始点/終点ノードの選択待ちであることを示す */
+.ntj-timeline.is-measuring {
+  cursor: crosshair;
+}
+
 /* ------------------------------------------------------------
    ボードズームラッパー
    タイムラインボード全体（SVG）を CSS zoom で拡大縮小する対象。
@@ -1074,4 +1079,80 @@
 .ntj-preset-form .setting-item {
   border-top: none;
   padding: 6px 0;
+}
+
+/* ============================================================
+   ノード間日数計測モーダル（MeasureModal）
+   ============================================================ */
+
+.ntj-measure-table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.ntj-measure-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background-color: var(--background-secondary);
+}
+
+.ntj-measure-label {
+  flex-shrink: 0;
+  width: 40px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding-top: 2px;
+}
+
+.ntj-measure-value {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ntj-measure-title {
+  font-size: 14px;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ntj-measure-date {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ntj-measure-result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 0 4px 0;
+}
+
+.ntj-measure-days {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-normal);
+}
+
+.ntj-measure-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.ntj-measure-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-warning, var(--text-error));
 }

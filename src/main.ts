@@ -32,11 +32,9 @@ export default class NovelsTimelinePlugin extends Plugin {
 
     // リボンアイコン（カスタムSVG）
     // addRibbonIcon が返す要素の innerHTML を差し替えて独自アイコンを設定する
-    const ribbonEl = this.addRibbonIcon("book-open", "Novels Timeline JP", () => {
+    const ribbonEl = this.addRibbonIcon("waypoints", "Novels Timeline JP", () => {
       this.activateView();
     });
-    // Obsidian が挿入したデフォルトアイコンをカスタムSVGで上書き
-    ribbonEl.innerHTML = `<svg class="lucide lucide-timeline-icon lucide-timeline" width="24" height="24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" version="1.1" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 12h.01"/><path d="M4 16h.01"/><path d="M4 20h.01"/><path d="M4 4h.01"/><path d="M4 8h.01"/><g stroke-width="1.2"><path d="M9.414 13.414a2 2 0 0 0 1.414.586H19a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1h-8.172a2 2 0 0 0-1.414.586L8 12z"/><path d="M9.414 21.414a2 2 0 0 0 1.414.586H19a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1h-8.172a2 2 0 0 0-1.414.586L8 20z"/><path d="M9.414 5.414A2 2 0 0 0 10.828 6H19a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1h-8.172a2 2 0 0 0-1.414.586L8 4z"/></g></svg>`;
 
     this.addCommand({
       id: "open-novels-timeline",

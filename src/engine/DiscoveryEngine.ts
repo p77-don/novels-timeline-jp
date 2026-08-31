@@ -2,9 +2,15 @@
 // DiscoveryEngine.ts
 // Novels Timeline JP — Vault内イベントファイル探索
 // ============================================================
+//
+// v2.0: データがコードブロックからフロントマターへ移行したことに伴い、
+// ファイル内容の正規表現スキャンではなく、Obsidian の metadataCache
+// （既にパース済みのフロントマター）を利用する方式に変更した。
+// これにより探索が高速化され、また YAML パースエラーの心配もなくなる。
+// ============================================================
 
-import { TFile, Vault } from "obsidian";
-import { TimelineParser } from "../parser/TimelineParser";
+import { App, CachedMetadata, TFile } from "obsidian";
+import { TimelineParser, NTJP_KEYS } from "../parser/TimelineParser";
 import { TimelineEvent } from "../types/TimelineTypes";
 import { CalendarSettings } from "../types/TimelineTypes";
 
@@ -14,13 +20,18 @@ export interface DiscoveryResult {
   errors: Array<{ filePath: string; message: string }>;
 }
 
+type ProcessResult =
+  | { ok: true; event: TimelineEvent }
+  | { ok: false; message: string }
+  | null;
+
 export class DiscoveryEngine {
-  private vault: Vault;
+  private app: App;
   private parser: TimelineParser;
   private excludedFolders: string[];
 
-  constructor(vault: Vault, calendar: CalendarSettings, excludedFolders: string[] = []) {
-    this.vault = vault;
+  constructor(app: App, calendar: CalendarSettings, excludedFolders: string[] = []) {
+    this.app = app;
     this.parser = new TimelineParser(calendar);
     this.excludedFolders = excludedFolders;
   }
@@ -38,20 +49,19 @@ export class DiscoveryEngine {
   // ----------------------------------------------------------
 
   async discoverAll(): Promise<DiscoveryResult> {
-    const files = this.vault.getMarkdownFiles();
+    const files = this.app.vault.getMarkdownFiles();
     const targetFiles = files.filter((f) => !this.isExcluded(f.path));
 
     const events: TimelineEvent[] = [];
     const errors: Array<{ filePath: string; message: string }> = [];
 
     for (const file of targetFiles) {
-      const result = await this.processFile(file);
-      if (result === null) continue; // timelineブロックなし = 対象外
+      const cache = this.app.metadataCache.getFileCache(file);
+      const result = this.processFrontmatter(file, cache);
+      if (result === null) continue; // NTJP_date なし = 対象外
       if (result.ok) {
         events.push(result.event);
       } else {
-        // invalid_date などエラーがあっても event を持つ場合がある
-        // ParseResult の構造上、ok:false でも event が存在するケースはない
         errors.push({ filePath: file.path, message: result.message });
       }
     }
@@ -60,48 +70,47 @@ export class DiscoveryEngine {
   }
 
   // ----------------------------------------------------------
-  // 単一ファイルを再解析して返す（差分更新用）
+  // 単一ファイルを再解析して返す（rename・初回検出時などに使用）
   // ----------------------------------------------------------
 
   async discoverFile(file: TFile): Promise<TimelineEvent | null> {
     if (this.isExcluded(file.path)) return null;
-    const result = await this.processFile(file);
-    if (!result || !result.ok) return null;
-    return result.event;
+    const cache = this.app.metadataCache.getFileCache(file);
+    const result = this.processFrontmatter(file, cache);
+    return result && result.ok ? result.event : null;
   }
 
   // ----------------------------------------------------------
-  // ファイルがtimelineブロックを持つか高速チェック（全文読み前）
+  // metadataCache "changed" イベントで渡されるcacheをそのまま使う版
+  // （再取得不要・常に最新のフロントマターが保証される）
   // ----------------------------------------------------------
 
-  async hasTimelineBlock(file: TFile): Promise<boolean> {
-    const content = await this.vault.cachedRead(file);
-    return /^```+novels_timeline_jp/m.test(content);
+  buildEventFromCache(file: TFile, cache: CachedMetadata | null): TimelineEvent | null {
+    if (this.isExcluded(file.path)) return null;
+    const result = this.processFrontmatter(file, cache);
+    return result && result.ok ? result.event : null;
+  }
+
+  // ----------------------------------------------------------
+  // ファイルがイベント用フロントマターを持つか（NTJP_date の有無で判定）
+  // ----------------------------------------------------------
+
+  hasEventFrontmatter(file: TFile): boolean {
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    return !!fm && fm[NTJP_KEYS.date] !== undefined;
   }
 
   // ----------------------------------------------------------
   // プライベートヘルパー
   // ----------------------------------------------------------
 
-  private async processFile(
-    file: TFile
-  ): Promise<
-    | { ok: true; event: TimelineEvent }
-    | { ok: false; message: string }
-    | null
-  > {
-    // キャッシュ読み（vault.cachedRead は Obsidian 内部キャッシュを利用）
-    let content: string;
-    try {
-      content = await this.vault.cachedRead(file);
-    } catch {
-      return { ok: false, message: `ファイル読み込みエラー: ${file.path}` };
-    }
+  private processFrontmatter(file: TFile, cache: CachedMetadata | null): ProcessResult {
+    const fm = cache?.frontmatter;
 
-    // timelineブロックを持たないファイルは早期リターン（全Vaultスキャンの高速化）
-    if (!/^```+novels_timeline_jp/m.test(content)) return null;
+    // NTJP_date が無いファイルはイベント対象外（早期リターン）
+    if (!fm || fm[NTJP_KEYS.date] === undefined) return null;
 
-    const result = this.parser.parse(content, file.path);
+    const result = this.parser.parse(fm as Record<string, unknown>, file.path);
     if (!result.ok) {
       return { ok: false, message: result.message };
     }

@@ -47,10 +47,22 @@ export interface TimelineEvent {
   /** イベントID = ファイル名（拡張子なし）例: "0001-旧館探索" */
   id: string;
 
-  /** 表示タイトル = ファイル名から番号部分を除いたもの 例: "旧館探索" */
+  /**
+   * イベント番号（自動付与）。
+   * フロントマターの NTJP_event_number に対応する。
+   * 新規イベント作成時、既存イベントの最大値+1を自動採番する。
+   * イベント選択リストなどの表示順はこの値を使用する。
+   */
+  eventNumber: number;
+
+  /**
+   * 表示タイトル。フロントマターの NTJP_event_title に対応する。
+   * 後方互換: NTJP_event_title が未設定の古いノートについては
+   * ファイル名から番号部分を除いたものにフォールバックする。
+   */
   displayTitle: string;
 
-  /** date フィールドの生文字列 例: "帝国暦1345年5月12日" */
+  /** NTJP_date フィールドの生文字列 例: "帝国暦1345年5月12日" */
   date: string;
 
   /**
@@ -63,28 +75,28 @@ export interface TimelineEvent {
   /** レーン番号（1〜10）。時間軸は横軸となり、レーンは縦方向の行として扱われる */
   lane: number;
 
-  /** ノードサイズ */
+  /** ノードの形状（NTJP_node フィールドに対応） */
   size: EventSize;
 
   /**
-   * ノードの色を表す値。
-   * 通常は「配色セット（ColorPreset）」のIDを保存する（一括変更を可能にするため）。
+   * ノードの色を表す値。フロントマターの NTJP_colors に対応する。
+   * 通常は「配色セット（ColorPreset）」のIDを保持する（一括変更を可能にするため）。
    * 後方互換のため、配色セット導入前に作成されたノートに残る
    * 生のHEXカラーコード（例: "#4A90E2"）もそのまま解釈できる。
    * 実際の色解決は ColorPresetStore.resolve() が行う。
    */
   color: string;
 
-  /** 登場人物一覧 */
+  /** 登場人物一覧（NTJP_characters） */
   characters: string[];
 
-  /** 場所一覧 */
+  /** 場所一覧（NTJP_locations） */
   locations: string[];
 
-  /** イベント概要 */
+  /** イベント概要（NTJP_summary） */
   summary?: string;
 
-  /** リンク先イベントID一覧（Wikilinkから抽出） */
+  /** リンク先イベントID一覧（NTJP_links のWikilinkから抽出） */
   links: string[];
 
   /** Vaultルートからの相対ファイルパス */
@@ -96,8 +108,7 @@ export interface TimelineEvent {
 
 export type TimelineEventError =
   | "invalid_date"
-  | "missing_required_field"
-  | "multiple_timeline_blocks";
+  | "missing_required_field";
 
 // ------------------------------------------------------------
 // 配色セット（ノード色＋文字色のプリセット）

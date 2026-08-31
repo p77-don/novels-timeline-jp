@@ -21,6 +21,8 @@ import { FilterEngine }     from "../engine/FilterEngine";
 import { TimelineRenderer, DateRow } from "./TimelineRenderer";
 import { TableView } from "./TableView";
 import { DateParser } from "../parser/DateParser";
+import { NTJP_KEYS } from "../parser/TimelineParser";
+import { MeasureModal } from "./MeasureModal";
 import {
   getMonthDef,
   BOARD_ZOOM_MIN,
@@ -56,6 +58,10 @@ export class TimelineView extends ItemView {
   private gaps:        GapSegment[]  = [];
   private selectedId:  string | null = null;
 
+  // ノード間日数計測モード
+  private measureMode:       boolean = false;
+  private measureStartEvent: TimelineEvent | null = null;
+
   private filterState: FilterState = {
     characters:  new Set(),
     locations:   new Set(),
@@ -85,7 +91,7 @@ export class TimelineView extends ItemView {
     const { app, settings } = plugin;
     this.eventStore     = new EventStore();
     this.cacheStore     = new CacheStore(app);
-    this.discovery      = new DiscoveryEngine(app.vault, settings.calendar, settings.excludedFolders);
+    this.discovery      = new DiscoveryEngine(app, settings.calendar, settings.excludedFolders);
     this.layoutEngine   = new LayoutEngine(settings.calendar);
     this.relationEngine = new RelationEngine();
     this.gapEngine      = new GapEngine(settings.calendar);
@@ -95,6 +101,11 @@ export class TimelineView extends ItemView {
   getViewType():    string { return TIMELINE_VIEW_TYPE; }
   getDisplayText(): string { return "Novels Timeline JP"; }
   getIcon():        string { return "book-open"; }
+
+  /** 現在保持している全イベントを返す（EventSidebarView の関連イベント選択などから使用） */
+  getAllEvents(): TimelineEvent[] {
+    return this.eventStore.getAll();
+  }
 
   async onOpen(): Promise<void> {
     await this.buildUI();
@@ -170,6 +181,13 @@ export class TimelineView extends ItemView {
     // ドラッグパン（上下左右）
     // ノードのドラッグ（lane変更）と区別するため、SVG背景上のみ反応させる
     this.registerPanEvents();
+
+    // Esc → ノード間日数計測モードを中止
+    this.registerDomEvent(document, "keydown", (e: KeyboardEvent) => {
+      if (e.key === "Escape" && this.measureMode) {
+        this.cancelMeasureMode();
+      }
+    });
   }
 
   // ----------------------------------------------------------
@@ -428,21 +446,18 @@ export class TimelineView extends ItemView {
   // ----------------------------------------------------------
 
   private registerFileWatcher(): void {
-    const vault = this.plugin.app.vault;
+    const vault         = this.plugin.app.vault;
+    const metadataCache = this.plugin.app.metadataCache;
 
-    this.registerEvent(vault.on("create", async (file) => {
+    // 作成・更新の検知は vault "create"/"modify" ではなく
+    // metadataCache "changed" を使う。
+    // フロントマターがデータの実体になったため、Obsidian がフロントマターの
+    // 再パースを終えたタイミング（＝このイベントの発火時）で読む必要がある。
+    // vault "modify" 直後は metadataCache の再パースが間に合わず、
+    // 古いフロントマターを読んでしまう競合が起こり得るため使用しない。
+    this.registerEvent(metadataCache.on("changed", (file, _data, cache) => {
       if (!(file instanceof TFile) || file.extension !== "md") return;
-      const event = await this.discovery.discoverFile(file);
-      if (!event) return;
-      this.eventStore.upsert(event);
-      this.cacheStore.setEntry(event.id, { order: event.timelineOrder, date: event.date });
-      this.filterEngine.buildIndex(this.eventStore.getAll());
-      this.scheduleRender();
-    }));
-
-    this.registerEvent(vault.on("modify", async (file) => {
-      if (!(file instanceof TFile) || file.extension !== "md") return;
-      const event = await this.discovery.discoverFile(file);
+      const event = this.discovery.buildEventFromCache(file, cache);
       if (event) {
         this.eventStore.upsert(event);
         this.cacheStore.setEntry(event.id, { order: event.timelineOrder, date: event.date });
@@ -609,11 +624,98 @@ export class TimelineView extends ItemView {
   // ----------------------------------------------------------
 
   private async handleNodeClick(event: TimelineEvent, _mouseX: number, _mouseY: number): Promise<void> {
+    // 計測モード中はノードクリックを計測専用の処理へ渡し、
+    // 通常のサイドバー編集は開かない
+    if (this.measureMode) {
+      this.handleMeasureNodeClick(event);
+      return;
+    }
+
     this.selectedId = this.selectedId === event.id ? null : event.id;
     this.scheduleRender();
     // 右サイドバーで編集画面を開く
     const sidebar = await this.plugin.getOrOpenSidebarView();
     sidebar?.showViewEdit(event);
+  }
+
+  // ----------------------------------------------------------
+  // ノード間日数計測
+  // ----------------------------------------------------------
+
+  /** 計測モードを開始する（始点ノード待ち状態にする） */
+  private startMeasureMode(): void {
+    this.measureMode       = true;
+    this.measureStartEvent = null;
+    this.selectedId        = null;
+    this.timelineEl.addClass("is-measuring");
+    this.scheduleRender();
+    new Notice("ノード間日数計測: 始点ノードをクリックしてください（Escで中止）");
+  }
+
+  /** 計測モードを中止し、通常状態へ戻す */
+  private cancelMeasureMode(): void {
+    this.measureMode       = false;
+    this.measureStartEvent = null;
+    this.selectedId        = null;
+    this.timelineEl.removeClass("is-measuring");
+    this.scheduleRender();
+    new Notice("ノード間日数計測を中止しました");
+  }
+
+  /**
+   * 計測モード中のノードクリックを処理する。
+   * 1回目のクリック → 始点として記録し、終点待ちにする。
+   * 2回目のクリック → 終点として確定し、結果モーダルを表示する。
+   */
+  private handleMeasureNodeClick(event: TimelineEvent): void {
+    if (!this.measureStartEvent) {
+      this.measureStartEvent = event;
+      this.selectedId = event.id;
+      this.scheduleRender();
+      new Notice(`始点: ${event.displayTitle} — 終点ノードをクリックしてください（Escで中止）`);
+      return;
+    }
+
+    // 同じノードを終点に選んだ場合は無視し、終点選択を継続する
+    if (event.id === this.measureStartEvent.id) {
+      new Notice("始点と同じノードです。別のノードを終点として選択してください");
+      return;
+    }
+
+    const startEvent = this.measureStartEvent;
+    const endEvent    = event;
+
+    this.measureMode       = false;
+    this.measureStartEvent = null;
+    this.selectedId        = null;
+    this.timelineEl.removeClass("is-measuring");
+    this.scheduleRender();
+
+    this.showMeasureResult(startEvent, endEvent);
+  }
+
+  /** 2イベント間の日数を算出し、結果モーダルを表示する */
+  private showMeasureResult(startEvent: TimelineEvent, endEvent: TimelineEvent): void {
+    const dateParser = new DateParser(this.plugin.settings.calendar);
+
+    const startParsed = dateParser.parse(startEvent.date);
+    const endParsed    = dateParser.parse(endEvent.date);
+
+    const startDateLabel = startParsed.ok ? dateParser.format(startParsed.parsed) : startEvent.date;
+    const endDateLabel    = endParsed.ok   ? dateParser.format(endParsed.parsed)   : endEvent.date;
+
+    // timelineOrder は「日数相当値」なので、差分がそのまま日数差になる
+    const diffDays  = endEvent.timelineOrder - startEvent.timelineOrder;
+    const diffLabel = this.gapEngine.formatDiff(Math.abs(diffDays));
+
+    new MeasureModal(this.app, {
+      startTitle: startEvent.displayTitle,
+      startDateLabel,
+      endTitle: endEvent.displayTitle,
+      endDateLabel,
+      diffDays,
+      diffLabel,
+    }).open();
   }
 
   private handleGapClick(gap: GapSegment): void {
@@ -638,6 +740,16 @@ export class TimelineView extends ItemView {
       item.onClick(async () => {
         const sidebar = await this.plugin.getOrOpenSidebarView();
         sidebar?.showCreate(dateStr, lane);
+      });
+    });
+
+    // ノード間日数計測
+    menu.addSeparator();
+    menu.addItem((item) => {
+      item.setTitle("ノード間日数計測");
+      item.setIcon("ruler");
+      item.onClick(() => {
+        this.startMeasureMode();
       });
     });
 
@@ -681,40 +793,19 @@ export class TimelineView extends ItemView {
     const updated = { ...event, lane: newLane };
     this.eventStore.upsert(updated);
 
-    // Markdown に書き込む
+    // フロントマター（NTJP_lane）に書き込む
     const file = this.plugin.app.vault.getFileByPath(event.filePath);
     if (file) {
       try {
-        const content    = await this.plugin.app.vault.read(file);
-        const newContent = this.rewriteLaneInContent(content, newLane);
-        if (newContent !== content) {
-          await this.plugin.app.vault.modify(file, newContent);
-        }
+        await this.plugin.app.fileManager.processFrontMatter(file, (fm) => {
+          fm[NTJP_KEYS.lane] = newLane;
+        });
       } catch (e) {
         new Notice(`laneの保存に失敗しました: ${(e as Error).message}`);
       }
     }
 
     this.scheduleRender();
-  }
-
-  /**
-   * Markdown 本文中の timelineブロック内の lane: を書き換える。
-   * - ``` または ```` で囲まれた timeline ブロックに対応
-   * - ブロック内の最初の lane: のみ書き換える
-   */
-  private rewriteLaneInContent(content: string, newLane: number): string {
-    // timelineブロックの開始〜終了を抽出して lane: を置換
-    return content.replace(
-      /(^`{3,}novels_timeline_jp\s*$)([\s\S]*?)(^`{3,}\s*$)/m,
-      (_match, open, body, close) => {
-        const newBody = body.replace(
-          /^(lane\s*:\s*)(-?\d+)/m,
-          `$1${newLane}`
-        );
-        return open + newBody + close;
-      }
-    );
   }
 
   // ----------------------------------------------------------

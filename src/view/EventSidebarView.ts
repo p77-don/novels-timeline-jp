@@ -2,11 +2,18 @@
 // EventSidebarView.ts
 // Novels Timeline JP — 右サイドバー（Obsidian ItemView）
 // ============================================================
+//
+// v2.0: イベントデータの保存先をコードブロックからフロントマター
+// （NTJP_* キー）へ移行。編集の書き込みは Obsidian 標準の
+// app.fileManager.processFrontMatter() を使用し、他プラグイン・他用途の
+// フロントマターキーを壊さないようにする。
+// ============================================================
 
-import { ItemView, WorkspaceLeaf, Notice, TFile } from "obsidian";
+import { ItemView, WorkspaceLeaf, Notice } from "obsidian";
 import type NovelsTimelinePlugin from "../main";
 import { TimelineEvent, ColorPreset } from "../types/TimelineTypes";
 import { DateParser } from "../parser/DateParser";
+import { NTJP_KEYS } from "../parser/TimelineParser";
 import { ColorPresetModal } from "./ColorPresetModal";
 
 export const EVENT_SIDEBAR_VIEW_TYPE = "novels-timeline-jp-sidebar";
@@ -18,6 +25,13 @@ export type SidebarMode =
 
 // ファイル名に使えない文字
 const INVALID_FILENAME_CHARS = /[\\/:*?"<>|]/;
+
+/** 関連イベント選択リストで使う軽量な一覧アイテム */
+interface EventListItem {
+  id: string;
+  eventNumber: number;
+  displayTitle: string;
+}
 
 export class EventSidebarView extends ItemView {
   private plugin:      NovelsTimelinePlugin;
@@ -131,7 +145,7 @@ export class EventSidebarView extends ItemView {
       i.id = "ntj-f-lane"; i.value = String(clampedLane); i.min = "1"; i.max = "10";
     });
 
-    // サイズ
+    // サイズ（ノードタイプ）
     this.addField(el, "サイズ", (w) => {
       const s = w.createEl("select", { cls: "ntj-sf-input" }); s.id = "ntj-f-size";
       for (const [v, t] of [["small","小"], ["medium","中（標準）"], ["big","大"]]) {
@@ -196,6 +210,12 @@ export class EventSidebarView extends ItemView {
     const el = this.contentEl2;
     el.createEl("h3", { cls: "ntj-sidebar-heading", text: event.displayTitle });
 
+    // イベント番号（自動付与・読み取り専用表示）
+    el.createEl("p", {
+      cls: "ntj-sidebar-eventnumber",
+      text: `イベント番号: ${String(event.eventNumber).padStart(4, "0")}`,
+    });
+
     // タイトル
     this.addField(el, "タイトル *", (w) => {
       const i = w.createEl("input", { type: "text", cls: "ntj-sf-input" });
@@ -216,7 +236,7 @@ export class EventSidebarView extends ItemView {
       i.id = "ntj-e-lane"; i.value = String(event.lane); i.min = "1"; i.max = "10";
     });
 
-    // サイズ
+    // サイズ（ノードタイプ）
     this.addField(el, "サイズ", (w) => {
       const s = w.createEl("select", { cls: "ntj-sf-input" }); s.id = "ntj-e-size";
       for (const [v, t] of [["small","小"], ["medium","中"], ["big","大"]]) {
@@ -260,6 +280,46 @@ export class EventSidebarView extends ItemView {
   }
 
   // ----------------------------------------------------------
+  // Vault横断でイベント一覧を取得するヘルパー
+  // ----------------------------------------------------------
+  //
+  // TimelineView（タイムライン画面）が開いていなくてもサイドバー単体で
+  // 正しく動作するよう、TimelineView の EventStore には依存せず、
+  // vault + metadataCache から直接フロントマターを読み取る。
+  // NTJP_date の有無で「イベントファイルかどうか」を判定する
+  // （DiscoveryEngine の判定条件と揃えている）。
+
+  private listAllEvents(): EventListItem[] {
+    const { vault, metadataCache } = this.plugin.app;
+    const items: EventListItem[] = [];
+
+    for (const file of vault.getMarkdownFiles()) {
+      const fm = metadataCache.getFileCache(file)?.frontmatter;
+      if (!fm || fm[NTJP_KEYS.date] === undefined) continue;
+
+      const eventNumber = Number(fm[NTJP_KEYS.eventNumber]);
+      const rawTitle = fm[NTJP_KEYS.eventTitle];
+      const displayTitle =
+        typeof rawTitle === "string" && rawTitle.trim().length > 0
+          ? rawTitle.trim()
+          : file.basename.replace(/^\d+-/, "");
+
+      items.push({
+        id: file.basename,
+        eventNumber: Number.isFinite(eventNumber) ? eventNumber : 0,
+        displayTitle,
+      });
+    }
+
+    return items;
+  }
+
+  /** 既存イベントの中で最大の NTJP_event_number を返す（無ければ 0） */
+  private getMaxEventNumber(): number {
+    return this.listAllEvents().reduce((max, e) => Math.max(max, e.eventNumber), 0);
+  }
+
+  // ----------------------------------------------------------
   // 関連イベント選択UI
   // ----------------------------------------------------------
 
@@ -271,9 +331,16 @@ export class EventSidebarView extends ItemView {
     const listEl = field.createDiv({ cls: "ntj-sf-link-list" });
     listEl.id = `${prefix}-links-list`;
 
+    // 既存イベント一覧（自分自身を除く・NTJP_event_number順）を先に取得
+    const selfId = this.mode.type === "view-edit" ? this.mode.event.id : null;
+    const allEvents = this.listAllEvents()
+      .filter((e) => e.id !== selfId)
+      .sort((a, b) => a.eventNumber - b.eventNumber);
+    const eventById = new Map(allEvents.map((e) => [e.id, e]));
+
     // 既存リンクを描画
     for (const linkId of currentLinks) {
-      this.addLinkItem(listEl, linkId);
+      this.addLinkItem(listEl, linkId, eventById);
     }
 
     // 追加ボタン行
@@ -281,20 +348,16 @@ export class EventSidebarView extends ItemView {
     const select = addRow.createEl("select", { cls: "ntj-sf-input ntj-sf-link-select" });
     select.id = `${prefix}-link-select`;
 
-    // 既存イベントをselectに列挙（自分自身を除く）
-    const selfId = this.mode.type === "view-edit" ? this.mode.event.id : null;
-    const allEvents = this.plugin.app.vault.getMarkdownFiles()
-      .map(f => f.basename)
-      .filter(name => /^\d{4}-/.test(name) && name !== selfId)
-      .sort();
-
     const placeholder = select.createEl("option", { text: "▼イベントを選択" });
     placeholder.value = "";
     placeholder.disabled = true;
     placeholder.selected = true;
 
-    for (const name of allEvents) {
-      const o = select.createEl("option", { text: name }); o.value = name;
+    // NTJP_event_number 順で列挙する
+    for (const e of allEvents) {
+      const label = `${String(e.eventNumber).padStart(4, "0")}: ${e.displayTitle}`;
+      const o = select.createEl("option", { text: label });
+      o.value = e.id;
     }
 
     const addBtn = addRow.createEl("button", { cls: "ntj-sf-btn", text: "追加" });
@@ -308,21 +371,22 @@ export class EventSidebarView extends ItemView {
         new Notice(`「${val}」はすでに追加されています`);
         return;
       }
-      this.addLinkItem(listEl, val);
+      this.addLinkItem(listEl, val, eventById);
       select.value = "";
     });
   }
 
-  private addLinkItem(listEl: HTMLElement, linkId: string): void {
+  private addLinkItem(listEl: HTMLElement, linkId: string, eventById: Map<string, EventListItem>): void {
     const item = listEl.createDiv({ cls: "ntj-sf-link-item" });
 
-    // 存在チェック
-    const exists = this.plugin.app.vault.getMarkdownFiles()
-      .some(f => f.basename === linkId);
+    const matched = eventById.get(linkId);
+    const displayText = matched
+      ? `${String(matched.eventNumber).padStart(4, "0")}: ${matched.displayTitle}`
+      : linkId;
 
-    const nameEl = item.createSpan({ cls: "ntj-sf-link-id", text: linkId });
+    const nameEl = item.createSpan({ cls: "ntj-sf-link-id", text: displayText });
     nameEl.dataset.id = linkId;
-    if (!exists) {
+    if (!matched) {
       nameEl.addClass("ntj-sf-link-missing");
       item.createSpan({ cls: "ntj-sf-link-warn", text: " ⚠ 存在しないイベント" });
     }
@@ -401,18 +465,27 @@ export class EventSidebarView extends ItemView {
     if (!file) { new Notice("ファイルが見つかりません"); return; }
 
     try {
-      let content = await this.plugin.app.vault.read(file);
-      content = this.rewriteBlock(content, {
-        date,
-        lane,
-        size,
-        color,
-        characters: chars.split(",").map(s => s.trim()).filter(Boolean),
-        locations:  locs.split(",").map(s => s.trim()).filter(Boolean),
-        summary,
-        links,
+      const charList = chars.split(",").map(s => s.trim()).filter(Boolean);
+      const locList  = locs.split(",").map(s => s.trim()).filter(Boolean);
+
+      // フロントマターの書き換えは Obsidian 標準の processFrontMatter を使う。
+      // これにより NTJP_* 以外の既存フロントマターキー（他プラグイン等）を
+      // 壊さずに済み、また Wikilink 文字列の引用符付けも Obsidian 側の
+      // シリアライザに任せられる。
+      await this.plugin.app.fileManager.processFrontMatter(file, (fm) => {
+        fm[NTJP_KEYS.eventTitle] = title;
+        fm[NTJP_KEYS.date]       = date;
+        fm[NTJP_KEYS.lane]       = lane;
+        fm[NTJP_KEYS.node]       = size;
+        fm[NTJP_KEYS.colors]     = color;
+        fm[NTJP_KEYS.characters] = charList;
+        fm[NTJP_KEYS.locations]  = locList;
+        fm[NTJP_KEYS.summary]    = summary || undefined;
+        fm[NTJP_KEYS.links]      = links.map((l) => `[[${l}]]`);
+        // NTJP_event_number は自動付与のため、ここでは触れない（既存値を保持）
       });
 
+      // タイトル変更時はファイル名も追従させる（番号プレフィックスは維持）
       const oldBaseName = file.basename;
       const prefix      = oldBaseName.match(/^(\d+)-/)?.[1] ?? "";
       const newBaseName = prefix ? `${prefix}-${title}` : title;
@@ -420,7 +493,6 @@ export class EventSidebarView extends ItemView {
         ? `${file.parent.path}/${newBaseName}.md`
         : `${newBaseName}.md`;
 
-      await this.plugin.app.vault.modify(file, content);
       if (newBaseName !== oldBaseName) {
         await this.plugin.app.fileManager.renameFile(file, newFullPath);
       }
@@ -514,15 +586,15 @@ export class EventSidebarView extends ItemView {
     locs: string; summary: string; folder: string;
     links: string[];
   }): Promise<void> {
-    const vault    = this.plugin.app.vault;
-    const maxNum   = vault.getMarkdownFiles().reduce((max, f) => {
-      const n = parseInt(f.basename.split("-")[0], 10);
-      return isNaN(n) ? max : Math.max(max, n);
-    }, 0);
-    const padded   = String(maxNum + 1).padStart(4, "0");
-    const fileName = `${padded}-${params.title}.md`;
-    const folder   = params.folder;
-    const fullPath = folder ? `${folder}/${fileName}` : fileName;
+    const vault = this.plugin.app.vault;
+
+    // イベント番号は、既存イベントの NTJP_event_number の最大値+1 を自動採番する
+    // （フロントマターを走査。ファイル名の数字プレフィックスには依存しない）
+    const nextNumber = this.getMaxEventNumber() + 1;
+    const padded     = String(nextNumber).padStart(4, "0");
+    const fileName   = `${padded}-${params.title}.md`;
+    const folder     = params.folder;
+    const fullPath   = folder ? `${folder}/${fileName}` : fileName;
 
     if (folder) {
       if (!vault.getAbstractFileByPath(folder)) {
@@ -532,31 +604,24 @@ export class EventSidebarView extends ItemView {
 
     const chars = params.chars.split(",").map(s => s.trim()).filter(Boolean);
     const locs  = params.locs.split(",").map(s => s.trim()).filter(Boolean);
-    const charLines = chars.length
-      ? "characters:\n" + chars.map(c => `  - ${c}`).join("\n")
-      : "characters:";
-    const locLines = locs.length
-      ? "locations:\n" + locs.map(l => `  - ${l}`).join("\n")
-      : "locations:";
-    const linkLines = params.links.length
-      ? "links:\n" + params.links.map(l => `  - "[[${l}]]"`).join("\n")
-      : "links:";
 
-    const template = [
-      `# ${padded}-${params.title}`, "",
-      "```novels_timeline_jp",
-      `date: ${params.date}`, "",
-      `lane: ${params.lane}`, "",
-      `size: ${params.size}`, "",
-      `color: "${params.color}"`, "",
-      charLines, "", locLines, "",
-      params.summary ? `summary: ${params.summary}` : "summary:", "",
-      linkLines,
-      "```", "",
-    ].join("\n");
+    const frontmatter = this.buildFrontmatterText({
+      eventNumber: nextNumber,
+      title: params.title,
+      date: params.date,
+      lane: params.lane,
+      size: params.size,
+      color: params.color,
+      characters: chars,
+      locations: locs,
+      summary: params.summary,
+      links: params.links,
+    });
+
+    const content = `${frontmatter}\n# ${params.title}\n`;
 
     try {
-      await vault.create(fullPath, template);
+      await vault.create(fullPath, content);
       // 作成のたびにノートが開くと煩わしいため、ここでは開かない。
       new Notice(`作成しました: ${fullPath}`);
     } catch (e) {
@@ -565,73 +630,64 @@ export class EventSidebarView extends ItemView {
   }
 
   // ----------------------------------------------------------
-  // timelineブロック書き換え
+  // フロントマター生成（新規作成専用）
   // ----------------------------------------------------------
+  //
+  // 新規ファイルにはまだ他プラグインのフロントマターキーが存在しないため、
+  // processFrontMatter を使わずテキストを直接組み立てる。
+  // Wikilink は YAML 上で quote しないと "[[" がフロー配列として
+  // 誤解釈されるため、明示的にダブルクォートで囲む。
 
-  /**
-   * ブロック本文を毎回完全に組み直す。
-   * フィールド順序は仕様通り固定：
-   *   1.date  2.lane  3.size  4.color
-   *   5.characters  6.locations  7.summary  8.links
-   * キーの有無・元の順序に関わらず常に同じレイアウトで書き出す。
-   *
-   * color には配色セットのID（または後方互換の生HEX値）を書き込む。
-   * これにより配色セット側の色を変更すれば、参照する全イベントの表示色を
-   * 一括で変更できる。
-   */
-  private rewriteBlock(content: string, fields: {
-    date: string; lane: number; size: string; color: string;
-    characters: string[]; locations: string[]; summary: string | undefined;
+  private buildFrontmatterText(fields: {
+    eventNumber: number;
+    title: string;
+    date: string;
+    lane: number;
+    size: string;
+    color: string;
+    characters: string[];
+    locations: string[];
+    summary: string;
     links: string[];
   }): string {
-    return content.replace(
-      /(^`{3,}novels_timeline_jp\s*$)([\s\S]*?)(^`{3,}\s*$)/m,
-      (_match, open, _body, close) => {
-        const lines: string[] = [];
+    const lines: string[] = ["---"];
 
-        // 1. date
-        lines.push(`date: ${fields.date}`);
-        lines.push("");
-        // 2. lane
-        lines.push(`lane: ${fields.lane}`);
-        lines.push("");
-        // 3. size
-        lines.push(`size: ${fields.size}`);
-        lines.push("");
-        // 4. color（配色セットID）
-        lines.push(`color: "${fields.color}"`);
-        lines.push("");
-        // 5. characters
-        if (fields.characters.length > 0) {
-          lines.push("characters:");
-          for (const c of fields.characters) lines.push(`  - ${c}`);
-        } else {
-          lines.push("characters:");
-        }
-        lines.push("");
-        // 6. locations
-        if (fields.locations.length > 0) {
-          lines.push("locations:");
-          for (const l of fields.locations) lines.push(`  - ${l}`);
-        } else {
-          lines.push("locations:");
-        }
-        lines.push("");
-        // 7. summary
-        lines.push(`summary: ${fields.summary ?? ""}`);
-        lines.push("");
-        // 8. links
-        if (fields.links.length > 0) {
-          lines.push("links:");
-          for (const l of fields.links) lines.push(`  - "[[${l}]]"`);
-        } else {
-          lines.push("links:");
-        }
-        lines.push("");
+    lines.push(`${NTJP_KEYS.eventNumber}: ${fields.eventNumber}`);
+    lines.push(`${NTJP_KEYS.eventTitle}: "${this.escapeYamlDouble(fields.title)}"`);
+    lines.push(`${NTJP_KEYS.date}: ${fields.date}`);
+    lines.push(`${NTJP_KEYS.lane}: ${fields.lane}`);
+    lines.push(`${NTJP_KEYS.node}: ${fields.size}`);
+    lines.push(`${NTJP_KEYS.colors}: "${fields.color}"`);
 
-        return open + "\n" + lines.join("\n") + close;
-      }
-    );
+    if (fields.characters.length > 0) {
+      lines.push(`${NTJP_KEYS.characters}:`);
+      for (const c of fields.characters) lines.push(`  - ${c}`);
+    } else {
+      lines.push(`${NTJP_KEYS.characters}: []`);
+    }
+
+    if (fields.locations.length > 0) {
+      lines.push(`${NTJP_KEYS.locations}:`);
+      for (const l of fields.locations) lines.push(`  - ${l}`);
+    } else {
+      lines.push(`${NTJP_KEYS.locations}: []`);
+    }
+
+    lines.push(`${NTJP_KEYS.summary}: "${this.escapeYamlDouble(fields.summary)}"`);
+
+    if (fields.links.length > 0) {
+      lines.push(`${NTJP_KEYS.links}:`);
+      for (const l of fields.links) lines.push(`  - "[[${l}]]"`);
+    } else {
+      lines.push(`${NTJP_KEYS.links}: []`);
+    }
+
+    lines.push("---", "");
+    return lines.join("\n");
+  }
+
+  private escapeYamlDouble(text: string): string {
+    return text.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   }
 
   // ----------------------------------------------------------
@@ -673,11 +729,11 @@ export class EventSidebarView extends ItemView {
    * 配色セットから選択するフィールド。
    * 選択結果は隠しinput（id: `${idPrefix}-color`）に「配色セットのID」として
    * 書き込まれる（実色ではない）。submitCreate/submitEdit はこのIDをそのまま
-   * イベントノートの color フィールドへ保存する。
+   * イベントノートの NTJP_colors フィールドへ保存する。
    * こうすることで、配色セット側の色を変更すれば、それを参照する
    * 全イベントの表示色を一括で変更できる。
    *
-   * currentColorValue は既存イベントの color フィールドの現在値
+   * currentColorValue は既存イベントの NTJP_colors フィールドの現在値
    * （配色セットIDまたは配色セット導入前の生HEX値）。
    * どの配色セットにも一致しない場合は、データを勝手に書き換えないよう
    * 「カスタム（現在の色）」を選択肢に加え、その値をそのまま保持する。

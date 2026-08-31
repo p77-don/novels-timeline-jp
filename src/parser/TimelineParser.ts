@@ -1,12 +1,34 @@
 // ============================================================
 // TimelineParser.ts
-// Novels Timeline JP — timelineブロック解析
+// Novels Timeline JP — フロントマター（NTJP_* キー）解析
+// ============================================================
+//
+// v2.0 でデータの保存先をコードブロックからフロントマターへ移行した。
+// フロントマターは Obsidian の metadataCache が既にパース済みのため、
+// このクラスは YAML の生パースは行わず、渡された frontmatter オブジェクト
+// （app.metadataCache.getFileCache(file)?.frontmatter）を解釈するのみ。
 // ============================================================
 
-import * as yaml from "js-yaml";
 import { TimelineEvent, TimelineEventError, EventSize } from "../types/TimelineTypes";
 import { DateParser } from "./DateParser";
 import { CalendarSettings } from "../types/TimelineTypes";
+
+// ------------------------------------------------------------
+// フロントマターキー名（一元管理）
+// ------------------------------------------------------------
+
+export const NTJP_KEYS = {
+  eventNumber: "NTJP_event_number",
+  eventTitle:  "NTJP_event_title",
+  date:        "NTJP_date",
+  lane:        "NTJP_lane",
+  node:        "NTJP_node",
+  colors:      "NTJP_colors",
+  characters:  "NTJP_characters",
+  locations:   "NTJP_locations",
+  links:       "NTJP_links",
+  summary:     "NTJP_summary",
+} as const;
 
 // ------------------------------------------------------------
 // パース結果
@@ -36,21 +58,18 @@ function extractWikilinkTarget(raw: string): string {
 }
 
 // ------------------------------------------------------------
-// ファイル名からIDとtitleを取り出す
+// ファイル名からIDを取り出す
 // ------------------------------------------------------------
 
 /**
- * "0001-旧館探索.md" → { id: "0001-旧館探索", displayTitle: "旧館探索" }
- * 番号部分（先頭の連続数字 + ハイフン）を除いた残りを displayTitle とする
+ * "0001-旧館探索.md" → { id: "0001-旧館探索", legacyDisplayTitle: "旧館探索" }
+ * legacyDisplayTitle は NTJP_event_title 未設定の古いノート向けフォールバック用。
  */
-export function parseFileName(filePath: string): { id: string; displayTitle: string } {
-  // パスからファイル名のみ取り出す
+export function parseFileName(filePath: string): { id: string; legacyDisplayTitle: string } {
   const fileName = filePath.split("/").pop() ?? filePath;
-  // .md 拡張子を除去
   const baseName = fileName.replace(/\.md$/i, "");
-  // 先頭の "0001-" パターンを除去して displayTitle を生成
-  const displayTitle = baseName.replace(/^\d+-/, "");
-  return { id: baseName, displayTitle };
+  const legacyDisplayTitle = baseName.replace(/^\d+-/, "");
+  return { id: baseName, legacyDisplayTitle };
 }
 
 // ------------------------------------------------------------
@@ -73,86 +92,27 @@ export class TimelineParser {
   // ----------------------------------------------------------
 
   /**
-   * Markdown ファイル全文を受け取り、timelineブロックをパースする
+   * フロントマターオブジェクトを受け取り、TimelineEvent を構築する。
+   * 呼び出し側（DiscoveryEngine）は、あらかじめ NTJP_date キーの有無で
+   * 「このファイルはイベントか」を判定してから呼び出すこと。
    *
-   * @param content   ファイル全文
-   * @param filePath  Vault相対パス
-   * @returns         ParseResult
+   * @param frontmatter  app.metadataCache.getFileCache(file)?.frontmatter
+   * @param filePath     Vault相対パス
    */
-  parse(content: string, filePath: string): ParseResult {
-    const blocks = this.extractTimelineBlocks(content);
-
-    // Rule-001: 複数ブロック禁止
-    if (blocks.length > 1) {
-      return {
-        ok: false,
-        error: "multiple_timeline_blocks",
-        message: `timelineブロックが${blocks.length}個あります（1ファイル1ブロックまで）`,
-      };
-    }
-
-    // timelineブロックなし → このファイルはイベントではない
-    if (blocks.length === 0) {
+  parse(frontmatter: Record<string, unknown> | undefined, filePath: string): ParseResult {
+    if (!frontmatter || typeof frontmatter !== "object") {
       return {
         ok: false,
         error: "missing_required_field",
-        message: "timelineブロックが見つかりません",
-      };
-    }
-
-    return this.parseBlock(blocks[0], filePath);
-  }
-
-  // ----------------------------------------------------------
-  // ブロック抽出
-  // ----------------------------------------------------------
-
-  /**
-   * Markdown本文から ```timeline ... ``` ブロックをすべて抽出する
-   * Rule-002: timelineブロック以外は解析対象外
-   */
-  private extractTimelineBlocks(content: string): string[] {
-    const blocks: string[] = [];
-    // ````timeline も考慮（ネストされたコードブロック対応）
-    const pattern = /^```+novels_timeline_jp\s*\n([\s\S]*?)^```+/gm;
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(content)) !== null) {
-      blocks.push(match[1]);
-    }
-    return blocks;
-  }
-
-  // ----------------------------------------------------------
-  // YAMLパース
-  // ----------------------------------------------------------
-
-  private parseBlock(blockContent: string, filePath: string): ParseResult {
-    const { id, displayTitle } = parseFileName(filePath);
-
-    // YAML解析
-    let raw: Record<string, unknown>;
-    try {
-      const parsed = yaml.load(blockContent);
-      if (!parsed || typeof parsed !== "object") {
-        return {
-          ok: false,
-          error: "missing_required_field",
-          message: "timelineブロックのYAMLが空またはオブジェクトではありません",
-        };
-      }
-      raw = parsed as Record<string, unknown>;
-    } catch (e) {
-      return {
-        ok: false,
-        error: "missing_required_field",
-        message: `YAMLパースエラー: ${(e as Error).message}`,
+        message: "フロントマターが見つかりません",
       };
     }
 
     // 必須フィールド検証
     const missingFields: string[] = [];
-    for (const field of ["date", "lane", "size", "color"] as const) {
-      if (raw[field] === undefined || raw[field] === null || raw[field] === "") {
+    for (const field of [NTJP_KEYS.date, NTJP_KEYS.lane, NTJP_KEYS.node, NTJP_KEYS.colors]) {
+      const v = frontmatter[field];
+      if (v === undefined || v === null || v === "") {
         missingFields.push(field);
       }
     }
@@ -164,13 +124,16 @@ export class TimelineParser {
       };
     }
 
+    const { id, legacyDisplayTitle } = parseFileName(filePath);
+
     // date パース
-    const dateStr = String(raw["date"]).trim();
+    const dateStr = String(frontmatter[NTJP_KEYS.date]).trim();
     const dateResult = this.dateParser.parse(dateStr);
+
     if (!dateResult.ok) {
       // invalid_date の場合もイベントとして生成し、error フラグを立てる
       const event = this.buildEvent({
-        id, displayTitle, filePath, raw,
+        id, legacyDisplayTitle, filePath, frontmatter,
         date: dateStr,
         timelineOrder: 0,
         error: "invalid_date",
@@ -179,7 +142,7 @@ export class TimelineParser {
     }
 
     const event = this.buildEvent({
-      id, displayTitle, filePath, raw,
+      id, legacyDisplayTitle, filePath, frontmatter,
       date: dateStr,
       timelineOrder: dateResult.timelineOrder,
       error: undefined,
@@ -194,27 +157,28 @@ export class TimelineParser {
 
   private buildEvent(params: {
     id: string;
-    displayTitle: string;
+    legacyDisplayTitle: string;
     filePath: string;
-    raw: Record<string, unknown>;
+    frontmatter: Record<string, unknown>;
     date: string;
     timelineOrder: number;
     error?: TimelineEventError;
   }): TimelineEvent {
-    const { id, displayTitle, filePath, raw, date, timelineOrder, error } = params;
+    const { id, legacyDisplayTitle, filePath, frontmatter, date, timelineOrder, error } = params;
 
     return {
       id,
-      displayTitle,
+      eventNumber:  this.parseIntField(frontmatter[NTJP_KEYS.eventNumber], 0, 0, 9999),
+      displayTitle: this.parseTitleField(frontmatter[NTJP_KEYS.eventTitle], legacyDisplayTitle),
       date,
       timelineOrder,
-      lane: this.parseIntField(raw["lane"], 1, 1, 10),
-      size: this.parseSizeField(raw["size"]),
-      color: this.parseColorField(raw["color"]),
-      characters: this.parseStringArray(raw["characters"]),
-      locations: this.parseStringArray(raw["locations"]),
-      summary: this.parseOptionalString(raw["summary"]),
-      links: this.parseLinks(raw["links"]),
+      lane: this.parseIntField(frontmatter[NTJP_KEYS.lane], 1, 1, 10),
+      size: this.parseSizeField(frontmatter[NTJP_KEYS.node]),
+      color: this.parseColorField(frontmatter[NTJP_KEYS.colors]),
+      characters: this.parseStringArray(frontmatter[NTJP_KEYS.characters]),
+      locations: this.parseStringArray(frontmatter[NTJP_KEYS.locations]),
+      summary: this.parseOptionalString(frontmatter[NTJP_KEYS.summary]),
+      links: this.parseLinks(frontmatter[NTJP_KEYS.links]),
       filePath,
       error,
     };
@@ -231,13 +195,25 @@ export class TimelineParser {
     return Math.max(min, Math.min(max, Math.round(n)));
   }
 
+  /**
+   * NTJP_event_title を優先し、未設定・空の場合のみ
+   * ファイル名から番号部分を除いた文字列にフォールバックする
+   * （NTJP_event_title 導入前の古いノートとの後方互換）。
+   */
+  private parseTitleField(value: unknown, legacyDisplayTitle: string): string {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+    return legacyDisplayTitle;
+  }
+
   private parseSizeField(value: unknown): EventSize {
     if (value === "small" || value === "medium" || value === "big") return value;
     return "medium";
   }
 
   /**
-   * color フィールドを解釈する。
+   * NTJP_colors フィールドを解釈する。
    * 通常は配色セットのID（例: "preset-1735500000-1234"）を保持するが、
    * 配色セット導入前の古いノートに残る生のHEXコード（例: "#4A90E2"）も
    * そのまま許容する（実色解決は ColorPresetStore.resolve() が行う）。
