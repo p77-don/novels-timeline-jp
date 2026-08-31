@@ -29,8 +29,11 @@ const INVALID_FILENAME_CHARS = /[\\/:*?"<>|]/;
 /** 関連イベント選択リストで使う軽量な一覧アイテム */
 interface EventListItem {
   id: string;
-  eventNumber: number;
   displayTitle: string;
+  /** yyyy/m/d 形式の表示用日付ラベル */
+  dateLabel: string;
+  /** ソート用の内部時系列値（DateParser.parse().timelineOrder） */
+  timelineOrder: number;
 }
 
 export class EventSidebarView extends ItemView {
@@ -138,11 +141,14 @@ export class EventSidebarView extends ItemView {
       i.id = "ntj-f-date"; i.value = dateStr; i.placeholder = this.datePlaceholder();
     });
 
-    // レーン（右クリック位置から自動取得、手動修正も可）
+    // レーン（右クリック位置から自動取得、プルダウンで手動修正も可）
     this.addField(el, "レーン（1〜10）", (w) => {
-      const i = w.createEl("input", { type: "number", cls: "ntj-sf-input" });
+      const s = w.createEl("select", { cls: "ntj-sf-input" }); s.id = "ntj-f-lane";
       const clampedLane = Math.max(1, Math.min(10, Math.round(lane)));
-      i.id = "ntj-f-lane"; i.value = String(clampedLane); i.min = "1"; i.max = "10";
+      for (let n = 1; n <= 10; n++) {
+        const o = s.createEl("option", { text: String(n) }); o.value = String(n);
+        if (n === clampedLane) o.selected = true;
+      }
     });
 
     // サイズ（ノードタイプ）
@@ -210,10 +216,10 @@ export class EventSidebarView extends ItemView {
     const el = this.contentEl2;
     el.createEl("h3", { cls: "ntj-sidebar-heading", text: event.displayTitle });
 
-    // イベント番号（自動付与・読み取り専用表示）
+    // ファイル名（一意性確保のための内部的な番号を含む。編集不可・参考表示）
     el.createEl("p", {
       cls: "ntj-sidebar-eventnumber",
-      text: `イベント番号: ${String(event.eventNumber).padStart(4, "0")}`,
+      text: `ファイル名: ${event.id}`,
     });
 
     // タイトル
@@ -232,8 +238,12 @@ export class EventSidebarView extends ItemView {
 
     // レーン
     this.addField(el, "レーン（1〜10）", (w) => {
-      const i = w.createEl("input", { type: "number", cls: "ntj-sf-input" });
-      i.id = "ntj-e-lane"; i.value = String(event.lane); i.min = "1"; i.max = "10";
+      const s = w.createEl("select", { cls: "ntj-sf-input" }); s.id = "ntj-e-lane";
+      const clampedLane = Math.max(1, Math.min(10, Math.round(event.lane)));
+      for (let n = 1; n <= 10; n++) {
+        const o = s.createEl("option", { text: String(n) }); o.value = String(n);
+        if (n === clampedLane) o.selected = true;
+      }
     });
 
     // サイズ（ノードタイプ）
@@ -291,32 +301,52 @@ export class EventSidebarView extends ItemView {
 
   private listAllEvents(): EventListItem[] {
     const { vault, metadataCache } = this.plugin.app;
+    const dateParser = new DateParser(this.plugin.settings.calendar);
     const items: EventListItem[] = [];
 
     for (const file of vault.getMarkdownFiles()) {
       const fm = metadataCache.getFileCache(file)?.frontmatter;
       if (!fm || fm[NTJP_KEYS.date] === undefined) continue;
 
-      const eventNumber = Number(fm[NTJP_KEYS.eventNumber]);
       const rawTitle = fm[NTJP_KEYS.eventTitle];
       const displayTitle =
         typeof rawTitle === "string" && rawTitle.trim().length > 0
           ? rawTitle.trim()
           : file.basename.replace(/^\d+-/, "");
 
+      const dateStr = String(fm[NTJP_KEYS.date]).trim();
+      const parsed  = dateParser.parse(dateStr);
+      // 不正な日付は一覧の末尾に回す（並び順を壊さないため）
+      const timelineOrder = parsed.ok ? parsed.timelineOrder : Number.POSITIVE_INFINITY;
+      const dateLabel      = parsed.ok ? dateParser.formatSlash(parsed.parsed) : dateStr;
+
       items.push({
         id: file.basename,
-        eventNumber: Number.isFinite(eventNumber) ? eventNumber : 0,
         displayTitle,
+        dateLabel,
+        timelineOrder,
       });
     }
 
     return items;
   }
 
-  /** 既存イベントの中で最大の NTJP_event_number を返す（無ければ 0） */
-  private getMaxEventNumber(): number {
-    return this.listAllEvents().reduce((max, e) => Math.max(max, e.eventNumber), 0);
+  /**
+   * 新規イベント用のファイル名連番を算出する。
+   * フロントマターには一切保存せず、常にファイル名（既存イベントファイルの
+   * "NNNN-" プレフィックス）から直接算出することで、番号の分裂・不整合を
+   * 起こしようがない設計にしている。
+   */
+  private getNextFileNumber(): number {
+    const { vault, metadataCache } = this.plugin.app;
+    let max = 0;
+    for (const file of vault.getMarkdownFiles()) {
+      const fm = metadataCache.getFileCache(file)?.frontmatter;
+      if (!fm || fm[NTJP_KEYS.date] === undefined) continue; // イベントファイルのみ対象
+      const m = file.basename.match(/^(\d+)-/);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
+    return max + 1;
   }
 
   // ----------------------------------------------------------
@@ -331,11 +361,11 @@ export class EventSidebarView extends ItemView {
     const listEl = field.createDiv({ cls: "ntj-sf-link-list" });
     listEl.id = `${prefix}-links-list`;
 
-    // 既存イベント一覧（自分自身を除く・NTJP_event_number順）を先に取得
+    // 既存イベント一覧（自分自身を除く・日付の時系列順）を先に取得
     const selfId = this.mode.type === "view-edit" ? this.mode.event.id : null;
     const allEvents = this.listAllEvents()
       .filter((e) => e.id !== selfId)
-      .sort((a, b) => a.eventNumber - b.eventNumber);
+      .sort((a, b) => a.timelineOrder - b.timelineOrder);
     const eventById = new Map(allEvents.map((e) => [e.id, e]));
 
     // 既存リンクを描画
@@ -353,9 +383,9 @@ export class EventSidebarView extends ItemView {
     placeholder.disabled = true;
     placeholder.selected = true;
 
-    // NTJP_event_number 順で列挙する
+    // 日付（時系列）順で列挙する
     for (const e of allEvents) {
-      const label = `${String(e.eventNumber).padStart(4, "0")}: ${e.displayTitle}`;
+      const label = `${e.dateLabel}  ${e.displayTitle}`;
       const o = select.createEl("option", { text: label });
       o.value = e.id;
     }
@@ -381,7 +411,7 @@ export class EventSidebarView extends ItemView {
 
     const matched = eventById.get(linkId);
     const displayText = matched
-      ? `${String(matched.eventNumber).padStart(4, "0")}: ${matched.displayTitle}`
+      ? `${matched.dateLabel}  ${matched.displayTitle}`
       : linkId;
 
     const nameEl = item.createSpan({ cls: "ntj-sf-link-id", text: displayText });
@@ -414,7 +444,7 @@ export class EventSidebarView extends ItemView {
 
     const title     = get("ntj-f-title")?.value.trim() ?? "";
     const dateRaw   = get("ntj-f-date")?.value.trim()  ?? "";
-    const laneStr   = get("ntj-f-lane")?.value.trim()  ?? "";
+    const laneStr   = (this.contentEl2.querySelector("#ntj-f-lane") as HTMLSelectElement)?.value ?? "";
     const size      = (this.contentEl2.querySelector("#ntj-f-size") as HTMLSelectElement)?.value ?? "small";
     const colorVal  = get("ntj-f-color")?.value.trim() ?? "#808080";
     const chars     = get("ntj-f-chars")?.value.trim() ?? "";
@@ -445,7 +475,7 @@ export class EventSidebarView extends ItemView {
 
     const title     = get("ntj-e-title")?.value.trim() ?? event.displayTitle;
     const dateRaw   = get("ntj-e-date")?.value.trim()  ?? this.toSlashFormat(event.date);
-    const laneStr   = get("ntj-e-lane")?.value.trim()  ?? String(event.lane);
+    const laneStr   = (this.contentEl2.querySelector("#ntj-e-lane") as HTMLSelectElement)?.value ?? String(event.lane);
     const size      = (this.contentEl2.querySelector("#ntj-e-size") as HTMLSelectElement)?.value || "small";
     const colorVal  = get("ntj-e-color")?.value.trim() ?? event.color;
     const chars     = get("ntj-e-chars")?.value.trim() ?? event.characters.join(", ");
@@ -482,7 +512,6 @@ export class EventSidebarView extends ItemView {
         fm[NTJP_KEYS.locations]  = locList;
         fm[NTJP_KEYS.summary]    = summary || undefined;
         fm[NTJP_KEYS.links]      = links.map((l) => `[[${l}]]`);
-        // NTJP_event_number は自動付与のため、ここでは触れない（既存値を保持）
       });
 
       // タイトル変更時はファイル名も追従させる（番号プレフィックスは維持）
@@ -588,9 +617,10 @@ export class EventSidebarView extends ItemView {
   }): Promise<void> {
     const vault = this.plugin.app.vault;
 
-    // イベント番号は、既存イベントの NTJP_event_number の最大値+1 を自動採番する
-    // （フロントマターを走査。ファイル名の数字プレフィックスには依存しない）
-    const nextNumber = this.getMaxEventNumber() + 1;
+    // ファイル名の連番は、既存イベントファイルの "NNNN-" プレフィックスの
+    // 最大値+1 を直接ファイル名から算出する（フロントマターには保存しない。
+    // 詳細は listAllEvents / getNextFileNumber のコメント参照）
+    const nextNumber = this.getNextFileNumber();
     const padded     = String(nextNumber).padStart(4, "0");
     const fileName   = `${padded}-${params.title}.md`;
     const folder     = params.folder;
@@ -606,7 +636,6 @@ export class EventSidebarView extends ItemView {
     const locs  = params.locs.split(",").map(s => s.trim()).filter(Boolean);
 
     const frontmatter = this.buildFrontmatterText({
-      eventNumber: nextNumber,
       title: params.title,
       date: params.date,
       lane: params.lane,
@@ -639,7 +668,6 @@ export class EventSidebarView extends ItemView {
   // 誤解釈されるため、明示的にダブルクォートで囲む。
 
   private buildFrontmatterText(fields: {
-    eventNumber: number;
     title: string;
     date: string;
     lane: number;
@@ -652,7 +680,6 @@ export class EventSidebarView extends ItemView {
   }): string {
     const lines: string[] = ["---"];
 
-    lines.push(`${NTJP_KEYS.eventNumber}: ${fields.eventNumber}`);
     lines.push(`${NTJP_KEYS.eventTitle}: "${this.escapeYamlDouble(fields.title)}"`);
     lines.push(`${NTJP_KEYS.date}: ${fields.date}`);
     lines.push(`${NTJP_KEYS.lane}: ${fields.lane}`);

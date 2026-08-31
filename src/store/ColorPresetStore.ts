@@ -11,7 +11,7 @@ const PRESET_PATH = ".obsidian/plugins/novels-timeline-jp/color-presets.json";
 
 /** 初回起動時に用意しておく既定の配色セット */
 const DEFAULT_PRESETS: ColorPreset[] = [
-  { id: "default-blue",   name: "青（標準）",   nodeColor: "#4A90E2", textColor: "#ffffff" },
+  { id: "default-blue",   name: "青",   nodeColor: "#4A90E2", textColor: "#ffffff" },
   { id: "default-orange", name: "オレンジ",     nodeColor: "#FFAA00", textColor: "#ffffff" },
   { id: "default-red",    name: "赤",           nodeColor: "#CC4455", textColor: "#ffffff" },
   { id: "default-green",  name: "緑",           nodeColor: "#3FA76E", textColor: "#ffffff" },

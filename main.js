@@ -50,12 +50,16 @@ var BOARD_ZOOM_MIN = 50;
 var BOARD_ZOOM_MAX = 200;
 var BOARD_ZOOM_DEFAULT = 100;
 var BOARD_ZOOM_STEP = 10;
+var GAP_THRESHOLD_MIN = 3;
+var GAP_THRESHOLD_MAX = 30;
+var GAP_THRESHOLD_DEFAULT = 30;
+var GAP_THRESHOLD_STEP = 1;
 var DEFAULT_SETTINGS = {
   newEventFolder: "",
   excludedFolders: [],
   boardZoom: 100,
   gapCompression: true,
-  gapThreshold: 30,
+  gapThreshold: GAP_THRESHOLD_DEFAULT,
   calendar: DEFAULT_CALENDAR,
   relationColor: "#808080",
   relationStyle: "solid",
@@ -369,7 +373,6 @@ var DateParser = class {
 
 // src/parser/TimelineParser.ts
 var NTJP_KEYS = {
-  eventNumber: "NTJP_event_number",
   eventTitle: "NTJP_event_title",
   date: "NTJP_date",
   lane: "NTJP_lane",
@@ -464,7 +467,6 @@ var TimelineParser = class {
     const { id, legacyDisplayTitle, filePath, frontmatter, date, timelineOrder, error } = params;
     return {
       id,
-      eventNumber: this.parseIntField(frontmatter[NTJP_KEYS.eventNumber], 0, 0, 9999),
       displayTitle: this.parseTitleField(frontmatter[NTJP_KEYS.eventTitle], legacyDisplayTitle),
       date,
       timelineOrder,
@@ -3373,6 +3375,7 @@ var TimelineRenderer = class {
     const totalSvgDy = this.clientDyToSvgDy(totalClientDy);
     const originY = this.laneToSvgY(this.dragState.originalLane, this._lastLanesStartY);
     this.dragState.circle.setAttribute("transform", `translate(0, ${totalSvgDy})`);
+    void originY;
   }
   onDragEnd(e, ctx) {
     if (!this.dragState.active) return;
@@ -3673,16 +3676,12 @@ var TimelineView = class extends import_obsidian2.ItemView {
     this.zoomWrapperEl.style.zoom = `${zoom / 100}`;
     if (this.zoomIndicatorEl) this.zoomIndicatorEl.textContent = `${zoom}%`;
   }
-  /**
-   * ホイール操作等でズーム値を段階的に変更する。
-   * ★ 設定の保存(saveSettings)は高頻度イベントから直接呼ばない
-   *   （wheel連打→保存の連鎖でフリーズする恐れがあるため、デバウンスする）。
-   */
-  adjustBoardZoom(deltaPercent) {
+  /** ズーム値を絶対値で設定する（ズームパネルのスライダー用） */
+  setBoardZoom(newZoomAbsolute) {
     const settings = this.plugin.settings;
     const newZoom = Math.max(
       BOARD_ZOOM_MIN,
-      Math.min(BOARD_ZOOM_MAX, settings.boardZoom + deltaPercent)
+      Math.min(BOARD_ZOOM_MAX, Math.round(newZoomAbsolute))
     );
     if (newZoom === settings.boardZoom) return;
     settings.boardZoom = newZoom;
@@ -3692,6 +3691,14 @@ var TimelineView = class extends import_obsidian2.ItemView {
     this.zoomSaveTimer = setTimeout(() => {
       void this.plugin.saveSettings();
     }, 400);
+  }
+  /**
+   * ホイール操作等でズーム値を段階的に変更する。
+   * ★ 設定の保存(saveSettings)は高頻度イベントから直接呼ばない
+   *   （wheel連打→保存の連鎖でフリーズする恐れがあるため、デバウンスする）。
+   */
+  adjustBoardZoom(deltaPercent) {
+    this.setBoardZoom(this.plugin.settings.boardZoom + deltaPercent);
   }
   /** ズーム値を既定値(100%)にリセットする */
   resetBoardZoom() {
@@ -3780,12 +3787,59 @@ var TimelineView = class extends import_obsidian2.ItemView {
     this.viewModeBtn.addEventListener("click", () => {
       this.toggleViewMode();
     });
-    this.zoomIndicatorEl = this.toolbarEl.createEl("button", {
+    const zoomWrapper = this.toolbarEl.createDiv({ cls: "ntj-zoom-wrapper" });
+    this.zoomIndicatorEl = zoomWrapper.createEl("button", {
       cls: "ntj-btn ntj-zoom-indicator",
       text: `${this.plugin.settings.boardZoom}%`,
-      title: "\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u4E0A\u3067 Shift+\u30DB\u30A4\u30FC\u30EB\u3067\u62E1\u5927\u7E2E\u5C0F\uFF08\u30AF\u30EA\u30C3\u30AF\u3067100%\u306B\u30EA\u30BB\u30C3\u30C8\uFF09"
+      title: `\u30AF\u30EA\u30C3\u30AF\u3067\u30B9\u30E9\u30A4\u30C0\u30FC\u3092\u8868\u793A\uFF08${BOARD_ZOOM_MIN}\u301C${BOARD_ZOOM_MAX}%\u3001${BOARD_ZOOM_STEP}%\u523B\u307F\uFF09
+\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u4E0A\u3067 Shift+\u30DB\u30A4\u30FC\u30EB\u3067\u3082\u5909\u66F4\u3067\u304D\u307E\u3059`
     });
-    this.zoomIndicatorEl.addEventListener("click", () => this.resetBoardZoom());
+    const zoomPanel = zoomWrapper.createDiv({ cls: "ntj-zoom-panel" });
+    zoomPanel.style.display = "none";
+    const zoomSlider = zoomPanel.createEl("input", { cls: "ntj-zoom-slider" });
+    zoomSlider.type = "range";
+    zoomSlider.min = String(BOARD_ZOOM_MIN);
+    zoomSlider.max = String(BOARD_ZOOM_MAX);
+    zoomSlider.step = String(BOARD_ZOOM_STEP);
+    zoomSlider.value = String(this.plugin.settings.boardZoom);
+    const zoomValueLabel = zoomPanel.createSpan({
+      cls: "ntj-zoom-panel-value",
+      text: `${this.plugin.settings.boardZoom}%`
+    });
+    const zoomResetBtn = zoomPanel.createEl("button", {
+      cls: "ntj-zoom-panel-reset",
+      text: "\u30EA\u30BB\u30C3\u30C8",
+      title: `${BOARD_ZOOM_DEFAULT}%\u306B\u623B\u3059`
+    });
+    zoomSlider.addEventListener("input", () => {
+      const v = parseInt(zoomSlider.value, 10);
+      this.setBoardZoom(v);
+      zoomValueLabel.textContent = `${this.plugin.settings.boardZoom}%`;
+    });
+    zoomResetBtn.addEventListener("click", () => {
+      this.resetBoardZoom();
+      zoomSlider.value = String(this.plugin.settings.boardZoom);
+      zoomValueLabel.textContent = `${this.plugin.settings.boardZoom}%`;
+    });
+    let zoomPanelOpen = false;
+    const openZoomPanel = () => {
+      zoomPanelOpen = true;
+      zoomSlider.value = String(this.plugin.settings.boardZoom);
+      zoomValueLabel.textContent = `${this.plugin.settings.boardZoom}%`;
+      zoomPanel.style.display = "flex";
+    };
+    const closeZoomPanel = () => {
+      zoomPanelOpen = false;
+      zoomPanel.style.display = "none";
+    };
+    this.zoomIndicatorEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (zoomPanelOpen) closeZoomPanel();
+      else openZoomPanel();
+    });
+    this.registerDomEvent(document, "click", (e) => {
+      if (!zoomWrapper.contains(e.target)) closeZoomPanel();
+    });
   }
   /**
    * フィルタパネル（独自ドロップダウン）
@@ -4214,7 +4268,7 @@ var import_obsidian3 = require("obsidian");
 // src/store/ColorPresetStore.ts
 var PRESET_PATH = ".obsidian/plugins/novels-timeline-jp/color-presets.json";
 var DEFAULT_PRESETS = [
-  { id: "default-blue", name: "\u9752\uFF08\u6A19\u6E96\uFF09", nodeColor: "#4A90E2", textColor: "#ffffff" },
+  { id: "default-blue", name: "\u9752", nodeColor: "#4A90E2", textColor: "#ffffff" },
   { id: "default-orange", name: "\u30AA\u30EC\u30F3\u30B8", nodeColor: "#FFAA00", textColor: "#ffffff" },
   { id: "default-red", name: "\u8D64", nodeColor: "#CC4455", textColor: "#ffffff" },
   { id: "default-green", name: "\u7DD1", nodeColor: "#3FA76E", textColor: "#ffffff" },
@@ -4558,12 +4612,14 @@ var EventSidebarView = class extends import_obsidian4.ItemView {
       i.placeholder = this.datePlaceholder();
     });
     this.addField(el, "\u30EC\u30FC\u30F3\uFF081\u301C10\uFF09", (w) => {
-      const i = w.createEl("input", { type: "number", cls: "ntj-sf-input" });
+      const s = w.createEl("select", { cls: "ntj-sf-input" });
+      s.id = "ntj-f-lane";
       const clampedLane = Math.max(1, Math.min(10, Math.round(lane)));
-      i.id = "ntj-f-lane";
-      i.value = String(clampedLane);
-      i.min = "1";
-      i.max = "10";
+      for (let n = 1; n <= 10; n++) {
+        const o = s.createEl("option", { text: String(n) });
+        o.value = String(n);
+        if (n === clampedLane) o.selected = true;
+      }
     });
     this.addField(el, "\u30B5\u30A4\u30BA", (w) => {
       const s = w.createEl("select", { cls: "ntj-sf-input" });
@@ -4627,7 +4683,7 @@ var EventSidebarView = class extends import_obsidian4.ItemView {
     el.createEl("h3", { cls: "ntj-sidebar-heading", text: event.displayTitle });
     el.createEl("p", {
       cls: "ntj-sidebar-eventnumber",
-      text: `\u30A4\u30D9\u30F3\u30C8\u756A\u53F7: ${String(event.eventNumber).padStart(4, "0")}`
+      text: `\u30D5\u30A1\u30A4\u30EB\u540D: ${event.id}`
     });
     this.addField(el, "\u30BF\u30A4\u30C8\u30EB *", (w) => {
       const i = w.createEl("input", { type: "text", cls: "ntj-sf-input" });
@@ -4641,11 +4697,14 @@ var EventSidebarView = class extends import_obsidian4.ItemView {
       i.placeholder = this.datePlaceholder();
     });
     this.addField(el, "\u30EC\u30FC\u30F3\uFF081\u301C10\uFF09", (w) => {
-      const i = w.createEl("input", { type: "number", cls: "ntj-sf-input" });
-      i.id = "ntj-e-lane";
-      i.value = String(event.lane);
-      i.min = "1";
-      i.max = "10";
+      const s = w.createEl("select", { cls: "ntj-sf-input" });
+      s.id = "ntj-e-lane";
+      const clampedLane = Math.max(1, Math.min(10, Math.round(event.lane)));
+      for (let n = 1; n <= 10; n++) {
+        const o = s.createEl("option", { text: String(n) });
+        o.value = String(n);
+        if (n === clampedLane) o.selected = true;
+      }
     });
     this.addField(el, "\u30B5\u30A4\u30BA", (w) => {
       const s = w.createEl("select", { cls: "ntj-sf-input" });
@@ -4695,24 +4754,43 @@ var EventSidebarView = class extends import_obsidian4.ItemView {
   listAllEvents() {
     var _a;
     const { vault, metadataCache } = this.plugin.app;
+    const dateParser = new DateParser(this.plugin.settings.calendar);
     const items = [];
     for (const file of vault.getMarkdownFiles()) {
       const fm = (_a = metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
       if (!fm || fm[NTJP_KEYS.date] === void 0) continue;
-      const eventNumber = Number(fm[NTJP_KEYS.eventNumber]);
       const rawTitle = fm[NTJP_KEYS.eventTitle];
       const displayTitle = typeof rawTitle === "string" && rawTitle.trim().length > 0 ? rawTitle.trim() : file.basename.replace(/^\d+-/, "");
+      const dateStr = String(fm[NTJP_KEYS.date]).trim();
+      const parsed = dateParser.parse(dateStr);
+      const timelineOrder = parsed.ok ? parsed.timelineOrder : Number.POSITIVE_INFINITY;
+      const dateLabel = parsed.ok ? dateParser.formatSlash(parsed.parsed) : dateStr;
       items.push({
         id: file.basename,
-        eventNumber: Number.isFinite(eventNumber) ? eventNumber : 0,
-        displayTitle
+        displayTitle,
+        dateLabel,
+        timelineOrder
       });
     }
     return items;
   }
-  /** 既存イベントの中で最大の NTJP_event_number を返す（無ければ 0） */
-  getMaxEventNumber() {
-    return this.listAllEvents().reduce((max, e) => Math.max(max, e.eventNumber), 0);
+  /**
+   * 新規イベント用のファイル名連番を算出する。
+   * フロントマターには一切保存せず、常にファイル名（既存イベントファイルの
+   * "NNNN-" プレフィックス）から直接算出することで、番号の分裂・不整合を
+   * 起こしようがない設計にしている。
+   */
+  getNextFileNumber() {
+    var _a;
+    const { vault, metadataCache } = this.plugin.app;
+    let max = 0;
+    for (const file of vault.getMarkdownFiles()) {
+      const fm = (_a = metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
+      if (!fm || fm[NTJP_KEYS.date] === void 0) continue;
+      const m = file.basename.match(/^(\d+)-/);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
+    return max + 1;
   }
   // ----------------------------------------------------------
   // 関連イベント選択UI
@@ -4723,7 +4801,7 @@ var EventSidebarView = class extends import_obsidian4.ItemView {
     const listEl = field.createDiv({ cls: "ntj-sf-link-list" });
     listEl.id = `${prefix}-links-list`;
     const selfId = this.mode.type === "view-edit" ? this.mode.event.id : null;
-    const allEvents = this.listAllEvents().filter((e) => e.id !== selfId).sort((a, b) => a.eventNumber - b.eventNumber);
+    const allEvents = this.listAllEvents().filter((e) => e.id !== selfId).sort((a, b) => a.timelineOrder - b.timelineOrder);
     const eventById = new Map(allEvents.map((e) => [e.id, e]));
     for (const linkId of currentLinks) {
       this.addLinkItem(listEl, linkId, eventById);
@@ -4736,7 +4814,7 @@ var EventSidebarView = class extends import_obsidian4.ItemView {
     placeholder.disabled = true;
     placeholder.selected = true;
     for (const e of allEvents) {
-      const label = `${String(e.eventNumber).padStart(4, "0")}: ${e.displayTitle}`;
+      const label = `${e.dateLabel}  ${e.displayTitle}`;
       const o = select.createEl("option", { text: label });
       o.value = e.id;
     }
@@ -4759,7 +4837,7 @@ var EventSidebarView = class extends import_obsidian4.ItemView {
   addLinkItem(listEl, linkId, eventById) {
     const item = listEl.createDiv({ cls: "ntj-sf-link-item" });
     const matched = eventById.get(linkId);
-    const displayText = matched ? `${String(matched.eventNumber).padStart(4, "0")}: ${matched.displayTitle}` : linkId;
+    const displayText = matched ? `${matched.dateLabel}  ${matched.displayTitle}` : linkId;
     const nameEl = item.createSpan({ cls: "ntj-sf-link-id", text: displayText });
     nameEl.dataset.id = linkId;
     if (!matched) {
@@ -4786,7 +4864,7 @@ var EventSidebarView = class extends import_obsidian4.ItemView {
     const get2 = (id) => this.contentEl2.querySelector(`#${id}`);
     const title = (_b = (_a = get2("ntj-f-title")) == null ? void 0 : _a.value.trim()) != null ? _b : "";
     const dateRaw = (_d = (_c = get2("ntj-f-date")) == null ? void 0 : _c.value.trim()) != null ? _d : "";
-    const laneStr = (_f = (_e = get2("ntj-f-lane")) == null ? void 0 : _e.value.trim()) != null ? _f : "";
+    const laneStr = (_f = (_e = this.contentEl2.querySelector("#ntj-f-lane")) == null ? void 0 : _e.value) != null ? _f : "";
     const size = (_h = (_g = this.contentEl2.querySelector("#ntj-f-size")) == null ? void 0 : _g.value) != null ? _h : "small";
     const colorVal = (_j = (_i = get2("ntj-f-color")) == null ? void 0 : _i.value.trim()) != null ? _j : "#808080";
     const chars = (_l = (_k = get2("ntj-f-chars")) == null ? void 0 : _k.value.trim()) != null ? _l : "";
@@ -4815,7 +4893,7 @@ var EventSidebarView = class extends import_obsidian4.ItemView {
     const get2 = (id) => this.contentEl2.querySelector(`#${id}`);
     const title = (_b = (_a = get2("ntj-e-title")) == null ? void 0 : _a.value.trim()) != null ? _b : event.displayTitle;
     const dateRaw = (_d = (_c = get2("ntj-e-date")) == null ? void 0 : _c.value.trim()) != null ? _d : this.toSlashFormat(event.date);
-    const laneStr = (_f = (_e = get2("ntj-e-lane")) == null ? void 0 : _e.value.trim()) != null ? _f : String(event.lane);
+    const laneStr = (_f = (_e = this.contentEl2.querySelector("#ntj-e-lane")) == null ? void 0 : _e.value) != null ? _f : String(event.lane);
     const size = ((_g = this.contentEl2.querySelector("#ntj-e-size")) == null ? void 0 : _g.value) || "small";
     const colorVal = (_i = (_h = get2("ntj-e-color")) == null ? void 0 : _h.value.trim()) != null ? _i : event.color;
     const chars = (_k = (_j = get2("ntj-e-chars")) == null ? void 0 : _j.value.trim()) != null ? _k : event.characters.join(", ");
@@ -4926,7 +5004,7 @@ var EventSidebarView = class extends import_obsidian4.ItemView {
   // ----------------------------------------------------------
   async createEventFile(params) {
     const vault = this.plugin.app.vault;
-    const nextNumber = this.getMaxEventNumber() + 1;
+    const nextNumber = this.getNextFileNumber();
     const padded = String(nextNumber).padStart(4, "0");
     const fileName = `${padded}-${params.title}.md`;
     const folder = params.folder;
@@ -4942,7 +5020,6 @@ var EventSidebarView = class extends import_obsidian4.ItemView {
     const chars = params.chars.split(",").map((s) => s.trim()).filter(Boolean);
     const locs = params.locs.split(",").map((s) => s.trim()).filter(Boolean);
     const frontmatter = this.buildFrontmatterText({
-      eventNumber: nextNumber,
       title: params.title,
       date: params.date,
       lane: params.lane,
@@ -4973,7 +5050,6 @@ var EventSidebarView = class extends import_obsidian4.ItemView {
   // 誤解釈されるため、明示的にダブルクォートで囲む。
   buildFrontmatterText(fields) {
     const lines = ["---"];
-    lines.push(`${NTJP_KEYS.eventNumber}: ${fields.eventNumber}`);
     lines.push(`${NTJP_KEYS.eventTitle}: "${this.escapeYamlDouble(fields.title)}"`);
     lines.push(`${NTJP_KEYS.date}: ${fields.date}`);
     lines.push(`${NTJP_KEYS.lane}: ${fields.lane}`);
@@ -5182,14 +5258,18 @@ var NovelsTimelineSettingTab = class extends import_obsidian5.PluginSettingTab {
         this.plugin.notifySettingsChanged();
       })
     );
-    new import_obsidian5.Setting(containerEl).setName("Gap Threshold").setDesc("Gap\u751F\u6210\u6761\u4EF6\uFF08\u65E5\u6570\u76F8\u5F53\u5024\uFF09").addText(
-      (text) => text.setValue(String(this.plugin.settings.gapThreshold)).onChange(async (value) => {
-        const n = parseInt(value, 10);
-        if (Number.isFinite(n) && n > 0) {
-          this.plugin.settings.gapThreshold = n;
-          await this.plugin.saveSettings();
-          this.plugin.notifySettingsChanged();
-        }
+    new import_obsidian5.Setting(containerEl).setName("Gap Threshold").setDesc(`Gap\u751F\u6210\u6761\u4EF6\uFF08\u65E5\u6570\u76F8\u5F53\u5024\u3001${GAP_THRESHOLD_MIN}\u301C${GAP_THRESHOLD_MAX}\uFF09\u3002\u30A4\u30D9\u30F3\u30C8\u9593\u9694\u304C\u3053\u306E\u5024\u4EE5\u4E0A\u306E\u5834\u5408\u306BGap\u3068\u3057\u3066\u5727\u7E2E\u8868\u793A\u3059\u308B\u3002`).addSlider(
+      (slider) => slider.setLimits(GAP_THRESHOLD_MIN, GAP_THRESHOLD_MAX, GAP_THRESHOLD_STEP).setValue(this.plugin.settings.gapThreshold).setDynamicTooltip().onChange(async (value) => {
+        this.plugin.settings.gapThreshold = value;
+        await this.plugin.saveSettings();
+        this.plugin.notifySettingsChanged();
+      })
+    ).addExtraButton(
+      (btn) => btn.setIcon("reset").setTooltip(`${GAP_THRESHOLD_DEFAULT}\u306B\u623B\u3059`).onClick(async () => {
+        this.plugin.settings.gapThreshold = GAP_THRESHOLD_DEFAULT;
+        await this.plugin.saveSettings();
+        this.plugin.notifySettingsChanged();
+        this.display();
       })
     );
     containerEl.createEl("h2", { text: "Calendar\uFF08\u66A6\u8A2D\u5B9A\uFF09" });

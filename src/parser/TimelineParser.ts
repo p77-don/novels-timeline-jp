@@ -16,9 +16,17 @@ import { CalendarSettings } from "../types/TimelineTypes";
 // ------------------------------------------------------------
 // フロントマターキー名（一元管理）
 // ------------------------------------------------------------
+//
+// 注意: イベント番号（ファイル名の "0001-" 部分）はあえて
+// フロントマターに保存しない。
+// 番号を編集可能なフィールドとして持たせると、ファイル名側の番号と
+// 値が分裂して同期不能になる（例: フロントマター側だけ番号を変更すると、
+// 自動採番が次に使う番号とファイル名が食い違う）。
+// 番号は「ファイル名の一意性を保つためだけの内部トークン」と割り切り、
+// 常にファイル名から算出する（＝真実の情報源を1箇所に保つ）。
+// イベント一覧の並び順は NTJP_date（timelineOrder）を用いる。
 
 export const NTJP_KEYS = {
-  eventNumber: "NTJP_event_number",
   eventTitle:  "NTJP_event_title",
   date:        "NTJP_date",
   lane:        "NTJP_lane",
@@ -168,7 +176,6 @@ export class TimelineParser {
 
     return {
       id,
-      eventNumber:  this.parseIntField(frontmatter[NTJP_KEYS.eventNumber], 0, 0, 9999),
       displayTitle: this.parseTitleField(frontmatter[NTJP_KEYS.eventTitle], legacyDisplayTitle),
       date,
       timelineOrder,

@@ -27,6 +27,7 @@ import {
   getMonthDef,
   BOARD_ZOOM_MIN,
   BOARD_ZOOM_MAX,
+  BOARD_ZOOM_DEFAULT,
   BOARD_ZOOM_STEP,
 } from "../settings/PluginSettings";
 
@@ -203,16 +204,12 @@ export class TimelineView extends ItemView {
     if (this.zoomIndicatorEl) this.zoomIndicatorEl.textContent = `${zoom}%`;
   }
 
-  /**
-   * ホイール操作等でズーム値を段階的に変更する。
-   * ★ 設定の保存(saveSettings)は高頻度イベントから直接呼ばない
-   *   （wheel連打→保存の連鎖でフリーズする恐れがあるため、デバウンスする）。
-   */
-  private adjustBoardZoom(deltaPercent: number): void {
+  /** ズーム値を絶対値で設定する（ズームパネルのスライダー用） */
+  private setBoardZoom(newZoomAbsolute: number): void {
     const settings = this.plugin.settings;
     const newZoom = Math.max(
       BOARD_ZOOM_MIN,
-      Math.min(BOARD_ZOOM_MAX, settings.boardZoom + deltaPercent)
+      Math.min(BOARD_ZOOM_MAX, Math.round(newZoomAbsolute))
     );
     if (newZoom === settings.boardZoom) return;
 
@@ -224,6 +221,15 @@ export class TimelineView extends ItemView {
     this.zoomSaveTimer = setTimeout(() => {
       void this.plugin.saveSettings();
     }, 400);
+  }
+
+  /**
+   * ホイール操作等でズーム値を段階的に変更する。
+   * ★ 設定の保存(saveSettings)は高頻度イベントから直接呼ばない
+   *   （wheel連打→保存の連鎖でフリーズする恐れがあるため、デバウンスする）。
+   */
+  private adjustBoardZoom(deltaPercent: number): void {
+    this.setBoardZoom(this.plugin.settings.boardZoom + deltaPercent);
   }
 
   /** ズーム値を既定値(100%)にリセットする */
@@ -331,13 +337,68 @@ export class TimelineView extends ItemView {
       this.toggleViewMode();
     });
 
-    // ─── ボードズーム表示（クリックで100%にリセット） ───
-    this.zoomIndicatorEl = this.toolbarEl.createEl("button", {
+    // ─── ボードズーム表示（クリックでスライダーパネルを表示） ───
+    const zoomWrapper = this.toolbarEl.createDiv({ cls: "ntj-zoom-wrapper" });
+    this.zoomIndicatorEl = zoomWrapper.createEl("button", {
       cls:   "ntj-btn ntj-zoom-indicator",
       text:  `${this.plugin.settings.boardZoom}%`,
-      title: "タイムライン上で Shift+ホイールで拡大縮小（クリックで100%にリセット）",
+      title: `クリックでスライダーを表示（${BOARD_ZOOM_MIN}〜${BOARD_ZOOM_MAX}%、${BOARD_ZOOM_STEP}%刻み）\nタイムライン上で Shift+ホイールでも変更できます`,
     });
-    this.zoomIndicatorEl.addEventListener("click", () => this.resetBoardZoom());
+
+    const zoomPanel = zoomWrapper.createDiv({ cls: "ntj-zoom-panel" });
+    zoomPanel.style.display = "none";
+
+    const zoomSlider = zoomPanel.createEl("input", { cls: "ntj-zoom-slider" });
+    zoomSlider.type  = "range";
+    zoomSlider.min   = String(BOARD_ZOOM_MIN);
+    zoomSlider.max   = String(BOARD_ZOOM_MAX);
+    zoomSlider.step  = String(BOARD_ZOOM_STEP);
+    zoomSlider.value = String(this.plugin.settings.boardZoom);
+
+    const zoomValueLabel = zoomPanel.createSpan({
+      cls: "ntj-zoom-panel-value",
+      text: `${this.plugin.settings.boardZoom}%`,
+    });
+
+    const zoomResetBtn = zoomPanel.createEl("button", {
+      cls: "ntj-zoom-panel-reset",
+      text: "リセット",
+      title: `${BOARD_ZOOM_DEFAULT}%に戻す`,
+    });
+
+    zoomSlider.addEventListener("input", () => {
+      const v = parseInt(zoomSlider.value, 10);
+      this.setBoardZoom(v);
+      zoomValueLabel.textContent = `${this.plugin.settings.boardZoom}%`;
+    });
+
+    zoomResetBtn.addEventListener("click", () => {
+      this.resetBoardZoom();
+      zoomSlider.value = String(this.plugin.settings.boardZoom);
+      zoomValueLabel.textContent = `${this.plugin.settings.boardZoom}%`;
+    });
+
+    let zoomPanelOpen = false;
+    const openZoomPanel = (): void => {
+      zoomPanelOpen = true;
+      zoomSlider.value = String(this.plugin.settings.boardZoom);
+      zoomValueLabel.textContent = `${this.plugin.settings.boardZoom}%`;
+      zoomPanel.style.display = "flex";
+    };
+    const closeZoomPanel = (): void => {
+      zoomPanelOpen = false;
+      zoomPanel.style.display = "none";
+    };
+
+    this.zoomIndicatorEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (zoomPanelOpen) closeZoomPanel(); else openZoomPanel();
+    });
+
+    // パネル外クリックで閉じる
+    this.registerDomEvent(document, "click", (e) => {
+      if (!zoomWrapper.contains(e.target as Node)) closeZoomPanel();
+    });
   }
 
   /**

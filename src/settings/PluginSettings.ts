@@ -99,6 +99,15 @@ export const BOARD_ZOOM_DEFAULT = 100;
 export const BOARD_ZOOM_STEP    = 10;
 
 // ------------------------------------------------------------
+// Gap Threshold（Gap生成条件：日数相当値）
+// ------------------------------------------------------------
+
+export const GAP_THRESHOLD_MIN     = 3;
+export const GAP_THRESHOLD_MAX     = 30;
+export const GAP_THRESHOLD_DEFAULT = 30;
+export const GAP_THRESHOLD_STEP    = 1;
+
+// ------------------------------------------------------------
 // デフォルト設定値
 // ------------------------------------------------------------
 
@@ -109,7 +118,7 @@ export const DEFAULT_SETTINGS: NovelsTimelineSettings = {
   boardZoom: 100,
 
   gapCompression: true,
-  gapThreshold: 30,
+  gapThreshold: GAP_THRESHOLD_DEFAULT,
 
   calendar: DEFAULT_CALENDAR,
 

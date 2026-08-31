@@ -48,14 +48,6 @@ export interface TimelineEvent {
   id: string;
 
   /**
-   * イベント番号（自動付与）。
-   * フロントマターの NTJP_event_number に対応する。
-   * 新規イベント作成時、既存イベントの最大値+1を自動採番する。
-   * イベント選択リストなどの表示順はこの値を使用する。
-   */
-  eventNumber: number;
-
-  /**
    * 表示タイトル。フロントマターの NTJP_event_title に対応する。
    * 後方互換: NTJP_event_title が未設定の古いノートについては
    * ファイル名から番号部分を除いたものにフォールバックする。

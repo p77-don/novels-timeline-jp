@@ -6,7 +6,7 @@
 import { App, PluginSettingTab, Setting, Notice } from "obsidian";
 import type NovelsTimelinePlugin from "../main";
 import { CalendarMonth, CalendarSettings } from "../types/TimelineTypes";
-import { DEFAULT_CALENDAR, BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, BOARD_ZOOM_DEFAULT } from "./PluginSettings";
+import { DEFAULT_CALENDAR, BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, BOARD_ZOOM_DEFAULT, GAP_THRESHOLD_MIN, GAP_THRESHOLD_MAX, GAP_THRESHOLD_DEFAULT, GAP_THRESHOLD_STEP } from "./PluginSettings";
 import { ColorPresetModal } from "../view/ColorPresetModal";
 
 export class NovelsTimelineSettingTab extends PluginSettingTab {
@@ -217,17 +217,27 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Gap Threshold")
-      .setDesc("Gap生成条件（日数相当値）")
-      .addText((text) =>
-        text
-          .setValue(String(this.plugin.settings.gapThreshold))
+      .setDesc(`Gap生成条件（日数相当値、${GAP_THRESHOLD_MIN}〜${GAP_THRESHOLD_MAX}）。イベント間隔がこの値以上の場合にGapとして圧縮表示する。`)
+      .addSlider((slider) =>
+        slider
+          .setLimits(GAP_THRESHOLD_MIN, GAP_THRESHOLD_MAX, GAP_THRESHOLD_STEP)
+          .setValue(this.plugin.settings.gapThreshold)
+          .setDynamicTooltip()
           .onChange(async (value) => {
-            const n = parseInt(value, 10);
-            if (Number.isFinite(n) && n > 0) {
-              this.plugin.settings.gapThreshold = n;
-              await this.plugin.saveSettings();
-              this.plugin.notifySettingsChanged();
-            }
+            this.plugin.settings.gapThreshold = value;
+            await this.plugin.saveSettings();
+            this.plugin.notifySettingsChanged();
+          })
+      )
+      .addExtraButton((btn) =>
+        btn
+          .setIcon("reset")
+          .setTooltip(`${GAP_THRESHOLD_DEFAULT}に戻す`)
+          .onClick(async () => {
+            this.plugin.settings.gapThreshold = GAP_THRESHOLD_DEFAULT;
+            await this.plugin.saveSettings();
+            this.plugin.notifySettingsChanged();
+            this.display();
           })
       );
 
