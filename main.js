@@ -4684,10 +4684,11 @@ var EventSidebarView = class extends import_obsidian5.ItemView {
   renderViewEdit(event) {
     const el = this.contentEl2;
     el.createEl("h3", { cls: "ntj-sidebar-heading", text: event.displayTitle });
-    el.createEl("p", {
-      cls: "ntj-sidebar-eventnumber",
-      text: `\u30D5\u30A1\u30A4\u30EB\u540D: ${event.id}`
-    });
+    const openRow = el.createDiv({ cls: "ntj-sf-btn-row ntj-sidebar-open-row" });
+    openRow.createEl("button", {
+      cls: "ntj-sf-btn",
+      text: "\u{1F4C4} \u30A4\u30D9\u30F3\u30C8\u30CE\u30FC\u30C8\u3092\u958B\u304F"
+    }).addEventListener("click", () => this.openEventNote(event));
     this.addField(el, "\u30BF\u30A4\u30C8\u30EB *", (w) => {
       const i = w.createEl("input", { type: "text", cls: "ntj-sf-input" });
       i.id = "ntj-e-title";
@@ -4981,6 +4982,18 @@ var EventSidebarView = class extends import_obsidian5.ItemView {
       errors.push("\u914D\u8272\u30BB\u30C3\u30C8\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
     }
     return errors;
+  }
+  // ----------------------------------------------------------
+  // イベントノートを開く（メインペインに新規タブ）
+  // ----------------------------------------------------------
+  async openEventNote(event) {
+    const file = this.plugin.app.vault.getFileByPath(event.filePath);
+    if (!file) {
+      new import_obsidian5.Notice("\u30D5\u30A1\u30A4\u30EB\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
+      return;
+    }
+    const leaf = this.plugin.app.workspace.getLeaf("tab");
+    await leaf.openFile(file);
   }
   // ----------------------------------------------------------
   // 削除確認
@@ -5363,7 +5376,7 @@ var NovelsTimelineSettingTab = class extends import_obsidian6.PluginSettingTab {
     const nameTd = tr.createEl("td");
     const nameInput = nameTd.createEl("input", { type: "text", cls: "ntj-calendar-month-name-input" });
     nameInput.value = month.name;
-    nameInput.placeholder = "\u4F8B\uFF1A\u4E94\u6708";
+    nameInput.placeholder = "\u4F8B\uFF1A\u4E00\u6708";
     nameInput.addEventListener("change", async () => {
       months[index].name = nameInput.value;
       await this.plugin.saveSettings();
@@ -5383,7 +5396,7 @@ var NovelsTimelineSettingTab = class extends import_obsidian6.PluginSettingTab {
       }
     });
     const delTd = tr.createEl("td");
-    const delBtn = delTd.createEl("button", { text: "\u2715" });
+    const delBtn = delTd.createEl("button", { text: "\u524A\u9664" });
     delBtn.addEventListener("click", async () => {
       months.splice(index, 1);
       months.forEach((m, i) => {

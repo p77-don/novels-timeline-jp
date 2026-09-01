@@ -389,7 +389,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
     const nameTd = tr.createEl("td");
     const nameInput = nameTd.createEl("input", { type: "text", cls: "ntj-calendar-month-name-input" });
     nameInput.value = month.name;
-    nameInput.placeholder = "例：五月";
+    nameInput.placeholder = "例：一月";
     nameInput.addEventListener("change", async () => {
       months[index].name = nameInput.value;
       await this.plugin.saveSettings();
@@ -413,7 +413,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
 
     // 削除ボタン
     const delTd = tr.createEl("td");
-    const delBtn = delTd.createEl("button", { text: "✕" });
+    const delBtn = delTd.createEl("button", { text: "削除" });
     delBtn.addEventListener("click", async () => {
       months.splice(index, 1);
       // 月番号を振り直す

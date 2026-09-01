@@ -216,11 +216,13 @@ export class EventSidebarView extends ItemView {
     const el = this.contentEl2;
     el.createEl("h3", { cls: "ntj-sidebar-heading", text: event.displayTitle });
 
-    // ファイル名（一意性確保のための内部的な番号を含む。編集不可・参考表示）
-    el.createEl("p", {
-      cls: "ntj-sidebar-eventnumber",
-      text: `ファイル名: ${event.id}`,
-    });
+    // タイトルと表示が被るファイル名の生表示はやめ、代わりにノート本体への
+    // アクセス経路として「開く」ボタンを設置する（メインペインに新規タブで開く）。
+    const openRow = el.createDiv({ cls: "ntj-sf-btn-row ntj-sidebar-open-row" });
+    openRow.createEl("button", {
+      cls: "ntj-sf-btn",
+      text: "📄 イベントノートを開く",
+    }).addEventListener("click", () => this.openEventNote(event));
 
     // タイトル
     this.addField(el, "タイトル *", (w) => {
@@ -584,6 +586,18 @@ export class EventSidebarView extends ItemView {
     }
 
     return errors;
+  }
+
+
+  // ----------------------------------------------------------
+  // イベントノートを開く（メインペインに新規タブ）
+  // ----------------------------------------------------------
+
+  private async openEventNote(event: TimelineEvent): Promise<void> {
+    const file = this.plugin.app.vault.getFileByPath(event.filePath);
+    if (!file) { new Notice("ファイルが見つかりません"); return; }
+    const leaf = this.plugin.app.workspace.getLeaf("tab");
+    await leaf.openFile(file);
   }
 
   // ----------------------------------------------------------

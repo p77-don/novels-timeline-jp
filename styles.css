@@ -717,6 +717,11 @@
   flex-wrap: wrap;
 }
 
+.ntj-sidebar-open-row {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
 .ntj-sf-btn {
   flex: 1;
   min-width: 60px;
