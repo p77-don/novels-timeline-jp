@@ -1019,6 +1019,10 @@
 
 .ntj-table-wrapper {
   width: 100%;
+  /* テーブル内のテキストを選択できるようにする
+     （ItemView は既定でテキスト選択が無効化されているため明示的に上書きする） */
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .ntj-table {
@@ -1080,6 +1084,8 @@
   min-width: 160px;
   max-width: 320px;
   color: var(--text-normal);
+  /* "_LineBreak_" を \n に変換した改行をそのまま表示する */
+  white-space: pre-wrap;
 }
 
 .ntj-table-link {
@@ -1103,9 +1109,34 @@
   white-space: nowrap;
 }
 
+.ntj-table-tag-clickable {
+  cursor: pointer;
+}
+
+.ntj-table-tag-clickable:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-accent);
+}
+
 .ntj-table-link-tag {
   background-color: var(--background-modifier-hover);
   color: var(--text-accent);
+  cursor: pointer;
+}
+
+.ntj-table-link-tag:hover {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+/* 関連イベントクリックでスクロールした行を一瞬ハイライトする */
+.ntj-tr.is-highlighted {
+  animation: ntj-table-row-highlight 1.6s ease-out;
+}
+
+@keyframes ntj-table-row-highlight {
+  0%   { background-color: var(--text-selection); }
+  100% { background-color: transparent; }
 }
 
 .ntj-table-empty {

@@ -104,6 +104,12 @@ export class TimelineRenderer {
   render(ctx: RenderContext): void {
     const { settings, totalWidth, totalHeight, virtualWindow } = ctx;
 
+    // 再描画のたびにSVG内のノード要素はすべて作り直されるため、
+    // ホバー中だった要素はDOMから消える際に mouseleave が発火せず、
+    // Tooltip が「表示されたまま」になってしまう（スクロール時に顕著）。
+    // 再描画の起点を問わず、常にここで一旦閉じることで確実に解消する。
+    this.tooltip.hide();
+
     const laneCount  = Math.max(LANE_MIN, settings.laneCount);
     const headerH    = HEADER_H;
     const gapColW    = GAP_COL_W;

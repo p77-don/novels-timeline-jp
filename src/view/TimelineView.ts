@@ -80,6 +80,8 @@ export class TimelineView extends ItemView {
 
   private viewMode: "timeline" | "table" = "timeline";
   private tableView!: TableView;
+  private characterFilterApi!: { addValue: (value: string) => void };
+  private locationFilterApi!:  { addValue: (value: string) => void };
 
   // タイマーID
   private renderTimer:    ReturnType<typeof setTimeout> | null = null;
@@ -102,7 +104,7 @@ export class TimelineView extends ItemView {
   getViewType():    string { return TIMELINE_VIEW_TYPE; }
   getDisplayText(): string {
     const calendarName = this.plugin.settings.calendar.name?.trim();
-    return calendarName ? `Novels Timeline JP - ${calendarName}` : "Novels Timeline JP";
+    return calendarName ? `${calendarName} - Novels Timeline JP` : "Novels Timeline JP";
   }
   getIcon():        string { return "timeline"; }
 
@@ -317,10 +319,10 @@ export class TimelineView extends ItemView {
     });
 
     // ─── 人物フィルタ ───
-    this.buildFilterPanel("ntj-filter-characters", "人物▼", "characters");
+    this.characterFilterApi = this.buildFilterPanel("ntj-filter-characters", "登場人物 ▼", "characters");
 
     // ─── 場所フィルタ ───
-    this.buildFilterPanel("ntj-filter-locations", "場所▼", "locations");
+    this.locationFilterApi = this.buildFilterPanel("ntj-filter-locations", "場所 ▼", "locations");
 
     const modeLabels: Record<string, string> = {
       selected: "関係線:選択",
@@ -421,7 +423,7 @@ export class TimelineView extends ItemView {
     cls: string,
     label: string,
     key: "characters" | "locations"
-  ): void {
+  ): { addValue: (value: string) => void } {
     const wrapper = this.toolbarEl.createDiv({ cls: "ntj-filter-wrapper" });
     const btn = wrapper.createEl("button", { cls: `ntj-btn ${cls}`, text: label });
 
@@ -491,6 +493,23 @@ export class TimelineView extends ItemView {
     this.registerDomEvent(document, "click", (e) => {
       if (!wrapper.contains(e.target as Node)) closePanel();
     });
+
+    /**
+     * 外部（テーブル表示の登場人物/場所タグなど）から値を選択状態にする。
+     * 既に選択済みの場合は何もしない（トグルではなく「選択状態にする」動作）。
+     */
+    const addValue = (value: string) => {
+      const set = this.filterState[key] as Set<string>;
+      if (!set.has(value)) {
+        set.add(value);
+        btn.toggleClass("is-active", set.size > 0);
+        this.scheduleRender();
+      }
+      // パネルが開いていればチェック状態を反映して再描画する
+      if (isOpen) openPanel();
+    };
+
+    return { addValue };
   }
 
   // ----------------------------------------------------------
@@ -645,10 +664,16 @@ export class TimelineView extends ItemView {
 
     // テーブルビューも最新データで更新（表示中かどうかに関わらず）
     const tableEvents = filtered.length < validEvents.length ? filtered : validEvents;
-    this.tableView.render(tableEvents, (filePath) => {
-      const file = this.plugin.app.vault.getFileByPath(filePath);
-      if (file) this.plugin.app.workspace.getLeaf(false).openFile(file);
-    });
+    this.tableView.render(
+      tableEvents,
+      (filePath) => {
+        const file = this.plugin.app.vault.getFileByPath(filePath);
+        if (file) this.plugin.app.workspace.getLeaf(false).openFile(file);
+      },
+      (eventId)  => this.handleTableLinkClick(eventId),
+      (name)     => this.characterFilterApi.addValue(name),
+      (name)     => this.locationFilterApi.addValue(name)
+    );
 
     const t1 = performance.now();
     this.updateDebugOverlay(validEvents.length, this.nodes.length, this.gaps.length, t1 - t0);
@@ -720,6 +745,15 @@ export class TimelineView extends ItemView {
     // 右サイドバーで編集画面を開く
     const sidebar = await this.plugin.getOrOpenSidebarView();
     sidebar?.showViewEdit(event);
+  }
+
+  /**
+   * テーブル表示の「関連イベント」タグをクリックした際、
+   * 対象行がテーブル内に見つからなかった場合（絞り込みで除外されている等）の
+   * フォールバック処理。行スクロール自体は TableView 内で完結する。
+   */
+  private handleTableLinkClick(eventId: string): void {
+    new Notice(`「${eventId}」は現在の絞り込み条件により一覧に表示されていません。`);
   }
 
   // ----------------------------------------------------------

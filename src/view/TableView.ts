@@ -9,15 +9,24 @@ import { TimelineEvent } from "../types/TimelineTypes";
 export class TableView {
   private containerEl: HTMLElement;
   private tableEl!: HTMLElement;
+  private highlightTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(containerEl: HTMLElement) {
     this.containerEl = containerEl;
   }
 
-  /** テーブルを描画する */
+  /**
+   * @param onOpenFile     タイトルクリック時: ファイルを開く
+   * @param onSelectLink   関連イベントクリック時: そのイベントの行へスクロールする
+   * @param onSelectChar   登場人物クリック時: 人物フィルタへ反映する
+   * @param onSelectLoc    場所クリック時: 場所フィルタへ反映する
+   */
   render(
     events: TimelineEvent[],
-    onOpenFile: (filePath: string) => void
+    onOpenFile:   (filePath: string) => void,
+    onSelectLink: (eventId: string) => void,
+    onSelectChar: (name: string) => void,
+    onSelectLoc:  (name: string) => void
   ): void {
     this.containerEl.empty();
 
@@ -43,6 +52,8 @@ export class TableView {
 
     for (const event of events) {
       const row = tbody.createEl("tr", { cls: "ntj-tr" });
+      // 関連イベントクリック時のスクロール先特定に使用する
+      row.setAttribute("data-event-id", event.id);
 
       // タイトル（クリックでファイルを開く）
       const titleTd = row.createEl("td", { cls: "ntj-td ntj-td-title" });
@@ -58,39 +69,45 @@ export class TableView {
         text: event.date || "—",
       });
 
-      // 登場人物
+      // 登場人物（クリックで人物フィルタへ反映）
       const charTd = row.createEl("td", { cls: "ntj-td ntj-td-chars" });
       if (event.characters && event.characters.length > 0) {
         for (const c of event.characters) {
-          charTd.createEl("span", { cls: "ntj-table-tag", text: c });
+          const tag = charTd.createEl("span", { cls: "ntj-table-tag ntj-table-tag-clickable", text: c });
+          tag.addEventListener("click", (e) => { e.stopPropagation(); onSelectChar(c); });
         }
       } else {
         charTd.textContent = "—";
       }
 
-      // 場所
+      // 場所（クリックで場所フィルタへ反映）
       const locTd = row.createEl("td", { cls: "ntj-td ntj-td-locs" });
       if (event.locations && event.locations.length > 0) {
         for (const l of event.locations) {
-          locTd.createEl("span", { cls: "ntj-table-tag", text: l });
+          const tag = locTd.createEl("span", { cls: "ntj-table-tag ntj-table-tag-clickable", text: l });
+          tag.addEventListener("click", (e) => { e.stopPropagation(); onSelectLoc(l); });
         }
       } else {
         locTd.textContent = "—";
       }
 
-      // 概要
-      row.createEl("td", {
-        cls:  "ntj-td ntj-td-summary",
-        text: event.summary || "—",
-      });
+      // 概要（"_LineBreak_" を改行として表示する。CSS側は white-space: pre-wrap）
+      const summaryTd = row.createEl("td", { cls: "ntj-td ntj-td-summary" });
+      summaryTd.textContent = event.summary
+        ? event.summary.replace(/_LineBreak_/g, "\n")
+        : "—";
 
-      // 関連イベント（links）
+      // 関連イベント（links。クリックでその行へスクロールする）
       const linkTd = row.createEl("td", { cls: "ntj-td ntj-td-links" });
       if (event.links && event.links.length > 0) {
         for (const link of event.links) {
-          // "[[0002-地下室発見]]" → "0002-地下室発見" を抽出
-          const label = link.replace(/^\[\[/, "").replace(/\]\]$/, "");
-          linkTd.createEl("span", { cls: "ntj-table-tag ntj-table-link-tag", text: label });
+          // "[[0002-地下室発見]]" → "0002-地下室発見" を抽出（旧形式との後方互換のため）
+          const targetId = link.replace(/^\[\[/, "").replace(/\]\]$/, "");
+          const tag = linkTd.createEl("span", { cls: "ntj-table-tag ntj-table-link-tag", text: targetId });
+          tag.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (!this.scrollToRow(targetId)) onSelectLink(targetId);
+          });
         }
       } else {
         linkTd.textContent = "—";
@@ -100,7 +117,34 @@ export class TableView {
     this.tableEl = wrapper;
   }
 
+  /**
+   * 指定イベントIDの行までスクロールし、一瞬ハイライトして視認しやすくする。
+   * @returns 該当行が見つかった場合は true
+   */
+  private scrollToRow(eventId: string): boolean {
+    const target = this.containerEl.querySelector<HTMLElement>(
+      `tr[data-event-id="${CSS.escape(eventId)}"]`
+    );
+    if (!target) return false;
+
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    if (this.highlightTimer) clearTimeout(this.highlightTimer);
+    // 直前のハイライトが残っていても一旦解除してから再度付与することで、
+    // 同じ行を連続でクリックした場合もアニメーションが再生されるようにする
+    target.removeClass("is-highlighted");
+    void target.offsetWidth; // reflow を強制してアニメーションをリスタートさせる
+    target.addClass("is-highlighted");
+    this.highlightTimer = setTimeout(() => {
+      target.removeClass("is-highlighted");
+      this.highlightTimer = null;
+    }, 1600);
+
+    return true;
+  }
+
   destroy(): void {
+    if (this.highlightTimer) clearTimeout(this.highlightTimer);
     this.containerEl.empty();
   }
 }

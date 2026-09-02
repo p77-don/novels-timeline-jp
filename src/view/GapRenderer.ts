@@ -5,6 +5,7 @@
 // ============================================================
 
 import { GapSegment } from "../types/TimelineTypes";
+import { getIcon } from "obsidian";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -24,15 +25,23 @@ export class GapRenderer {
 
     const y          = gap.y; // gap.y は実体としてSVG Y座標
     const cardX       = axisX + gapColW / 2 + 4; // GAP列の中央よりやや右（レーン寄り）
-    const labelText   = gap.expanded ? `▲ ${gap.label}` : `▼ ${gap.label}`;
+    // 圧縮中（クリックで展開できる）: chevrons-up-down
+    // 展開中（クリックで圧縮できる）: chevrons-down-up
+    const iconId      = gap.expanded ? "chevrons-down-up" : "chevrons-up-down";
+    const labelText   = gap.label;
 
     // カード横幅は GAP列の幅を上限とし、それに収まるようフォントサイズを調整する
     const PADDING     = 10;
+    const ICON_SIZE   = 12;
+    const ICON_GAP    = 3; // アイコンとテキストの間隔
     const minFont     = 7;
     const maxFont     = 11;
     const labelW      = Math.max(28, gapColW - 8); // 列の左右にわずかな余白
     const charWidthRatio = 0.62; // フォントサイズに対するおおよその1文字幅
-    let fontSize = Math.min(maxFont, (labelW - PADDING) / Math.max(1, labelText.length) / charWidthRatio);
+    let fontSize = Math.min(
+      maxFont,
+      (labelW - PADDING - ICON_SIZE - ICON_GAP) / Math.max(1, labelText.length) / charWidthRatio
+    );
     fontSize = Math.max(minFont, fontSize);
 
     // カード縦幅は割り当てられたスロット高さに収める（GAP同士の重なり防止）
@@ -100,11 +109,25 @@ export class GapRenderer {
     highlight.setAttribute("fill-opacity", "0.5");
     g.appendChild(highlight);
 
-    // ── テキスト ──
+    // ── アイコン + テキスト（カード内で中央寄せしたグループとして配置） ──
+    const textWidthEstimate = labelText.length * fontSize * charWidthRatio;
+    const groupWidth = ICON_SIZE + ICON_GAP + textWidthEstimate;
+    const groupStartX = cardX - groupWidth / 2;
+
+    const icon = getIcon(iconId);
+    if (icon) {
+      icon.setAttribute("width",  String(ICON_SIZE));
+      icon.setAttribute("height", String(ICON_SIZE));
+      icon.setAttribute("x",      String(groupStartX));
+      icon.setAttribute("y",      String(y - ICON_SIZE / 2));
+      icon.setAttribute("stroke", "var(--text-muted)");
+      g.appendChild(icon);
+    }
+
     const text = document.createElementNS(SVG_NS, "text");
-    text.setAttribute("x",                 String(cardX));
+    text.setAttribute("x",                 String(groupStartX + ICON_SIZE + ICON_GAP));
     text.setAttribute("y",                 String(y));
-    text.setAttribute("text-anchor",       "middle");
+    text.setAttribute("text-anchor",       "start");
     text.setAttribute("dominant-baseline", "central");
     text.setAttribute("font-size",         String(fontSize.toFixed(1)));
     text.setAttribute("font-weight",       "500");
