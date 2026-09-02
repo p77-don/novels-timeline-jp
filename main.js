@@ -644,8 +644,9 @@ var BASE_UNIT_HALF_HEIGHT = 8;
 var START_X = LANE_LABEL_W + 20;
 var MIN_X_GAP = 46;
 var X_SCALE = 4;
+var NODE_EDGE_PADDING = 50;
 var GAP_MIN_DAYS = 3;
-var GAP_SLOT_WIDTH = Math.max(MIN_X_GAP, GAP_MIN_DAYS * X_SCALE);
+var GAP_SLOT_WIDTH = Math.max(MIN_X_GAP, GAP_MIN_DAYS * X_SCALE) * 1.5;
 var EXPANDED_PX_PER_DAY = 20;
 var EXPANDED_MIN_WIDTH = 120;
 var LEAD_DAYS_BEFORE_FIRST = 3;
@@ -708,25 +709,39 @@ var LayoutEngine = class {
     let currentX = START_X;
     currentX += Math.max(MIN_X_GAP, LEAD_DAYS_BEFORE_FIRST * X_SCALE);
     xMap.set(groups[0].order, currentX);
+    let prevGroupMaxWidth = this.groupMaxPillWidth(groups[0].events);
     for (let i = 1; i < groups.length; i++) {
       const prev = groups[i - 1];
       const cur = groups[i];
       const orderDiff = cur.order - prev.order;
+      const minWidthAwareGap = prevGroupMaxWidth + NODE_EDGE_PADDING;
       if (gapCompression) {
         const matchingGap = gaps.find(
           (g) => g.fromOrder === prev.order && g.toOrder === cur.order
         );
         if (matchingGap) {
-          currentX += matchingGap.expanded ? Math.max(EXPANDED_MIN_WIDTH, orderDiff * EXPANDED_PX_PER_DAY) : GAP_SLOT_WIDTH;
+          const gapWidth = matchingGap.expanded ? Math.max(EXPANDED_MIN_WIDTH, orderDiff * EXPANDED_PX_PER_DAY) : GAP_SLOT_WIDTH;
+          currentX += Math.max(gapWidth, minWidthAwareGap);
         } else {
-          currentX += Math.max(MIN_X_GAP, orderDiff * X_SCALE);
+          currentX += Math.max(MIN_X_GAP, orderDiff * X_SCALE, minWidthAwareGap);
         }
       } else {
-        currentX += Math.max(MIN_X_GAP, orderDiff * X_SCALE);
+        currentX += Math.max(MIN_X_GAP, orderDiff * X_SCALE, minWidthAwareGap);
       }
       xMap.set(cur.order, currentX);
+      prevGroupMaxWidth = this.groupMaxPillWidth(cur.events);
     }
     return xMap;
+  }
+  /** グループ内イベントのうち、最も描画幅が広いノードの幅(px)を返す */
+  groupMaxPillWidth(events) {
+    let maxWidth = 0;
+    for (const event of events) {
+      const radius = this.calcRadius(event.size);
+      const width = estimateNodePillWidth(event, radius);
+      if (width > maxWidth) maxWidth = width;
+    }
+    return maxWidth;
   }
   // ----------------------------------------------------------
   // ③ グループ内レイアウト
@@ -5423,7 +5438,7 @@ var NovelsTimelinePlugin = class extends import_obsidian7.Plugin {
       EVENT_SIDEBAR_VIEW_TYPE,
       (leaf) => new EventSidebarView(leaf, this)
     );
-    const ribbonEl = this.addRibbonIcon("waypoints", "Novels Timeline JP", () => {
+    const ribbonEl = this.addRibbonIcon("timeline", "Novels Timeline JP", () => {
       this.activateView();
     });
     this.addCommand({

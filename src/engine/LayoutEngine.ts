@@ -45,10 +45,19 @@ const BASE_UNIT_HALF_HEIGHT = 8;
 const START_X               = LANE_LABEL_W + 20;
 const MIN_X_GAP              = 46;   // 隣接イベント間の最小X間隔(px)
 const X_SCALE                = 4.0;  // 通常描画時の timelineOrder差 → px (1日=4px)
+/**
+ * ノード右端と次のノード左端の間に必ず確保する余白(px)。
+ * これが無いと big/medium サイズのノード幅が列間隔(MIN_X_GAP等)を
+ * 超えたときに隣接ノード同士が重なり、関係線もノードの下に隠れてしまう。
+ */
+const NODE_EDGE_PADDING      = 50;
 /** Gapとして圧縮できる最小日数。これ未満は圧縮対象にしない（GAP同士の重なり防止） */
 export const GAP_MIN_DAYS    = 3;
-/** Gap圧縮時の幅(px) — 常に「3日分」に相当する幅で固定表示する */
-export const GAP_SLOT_WIDTH  = Math.max(MIN_X_GAP, GAP_MIN_DAYS * X_SCALE);
+/**
+ * Gap圧縮時の幅(px) — 常に「3日分」に相当する幅で固定表示する。
+ * GAP同士が密集して重なるのを防ぐため、基準幅の1.5倍を表示幅とする。
+ */
+export const GAP_SLOT_WIDTH  = Math.max(MIN_X_GAP, GAP_MIN_DAYS * X_SCALE) * 1.5;
 export const EXPANDED_PX_PER_DAY    = 20;   // Gap展開時の1日あたり幅(px)
 export const EXPANDED_MIN_WIDTH     = 120;  // Gap展開時の最小幅(px) — 圧縮時より必ず大きくする
 /** 最初のイベントノードが時間軸の起点(0位置)に重ならないよう設ける先行日数 */
@@ -158,30 +167,51 @@ export class LayoutEngine {
     currentX += Math.max(MIN_X_GAP, LEAD_DAYS_BEFORE_FIRST * X_SCALE);
     xMap.set(groups[0].order, currentX);
 
+    // 直前グループ内で最も幅の広いノードの描画幅(px)。
+    // ノードは左端(x)を起点に右方向へこの幅ぶん描画されるため、
+    // 次グループの開始Xがこれより手前だとサイズ違いのノード同士が重なってしまう。
+    let prevGroupMaxWidth = this.groupMaxPillWidth(groups[0].events);
+
     for (let i = 1; i < groups.length; i++) {
       const prev      = groups[i - 1];
       const cur       = groups[i];
       const orderDiff = cur.order - prev.order;
+      // 直前ノードの右端 + 余白 を下回らないよう下限を設ける
+      // （small/medium/big いずれのサイズでも重なりを防ぐ）
+      const minWidthAwareGap = prevGroupMaxWidth + NODE_EDGE_PADDING;
 
       if (gapCompression) {
         const matchingGap = gaps.find(
           (g) => g.fromOrder === prev.order && g.toOrder === cur.order
         );
         if (matchingGap) {
-          currentX += matchingGap.expanded
+          const gapWidth = matchingGap.expanded
             ? Math.max(EXPANDED_MIN_WIDTH, orderDiff * EXPANDED_PX_PER_DAY)
             : GAP_SLOT_WIDTH;
+          currentX += Math.max(gapWidth, minWidthAwareGap);
         } else {
-          currentX += Math.max(MIN_X_GAP, orderDiff * X_SCALE);
+          currentX += Math.max(MIN_X_GAP, orderDiff * X_SCALE, minWidthAwareGap);
         }
       } else {
-        currentX += Math.max(MIN_X_GAP, orderDiff * X_SCALE);
+        currentX += Math.max(MIN_X_GAP, orderDiff * X_SCALE, minWidthAwareGap);
       }
 
       xMap.set(cur.order, currentX);
+      prevGroupMaxWidth = this.groupMaxPillWidth(cur.events);
     }
 
     return xMap;
+  }
+
+  /** グループ内イベントのうち、最も描画幅が広いノードの幅(px)を返す */
+  private groupMaxPillWidth(events: TimelineEvent[]): number {
+    let maxWidth = 0;
+    for (const event of events) {
+      const radius = this.calcRadius(event.size);
+      const width  = estimateNodePillWidth(event, radius);
+      if (width > maxWidth) maxWidth = width;
+    }
+    return maxWidth;
   }
 
   // ----------------------------------------------------------

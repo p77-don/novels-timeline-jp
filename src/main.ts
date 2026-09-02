@@ -30,8 +30,8 @@ export default class NovelsTimelinePlugin extends Plugin {
       (leaf: WorkspaceLeaf) => new EventSidebarView(leaf, this)
     );
 
-    // リボンアイコン（lucideの標準アイコン "waypoints" を使用）
-    const ribbonEl = this.addRibbonIcon("waypoints", "Novels Timeline JP", () => {
+    // リボンアイコン（lucideの標準アイコン "timeline" を使用）
+    const ribbonEl = this.addRibbonIcon("timeline", "Novels Timeline JP", () => {
       this.activateView();
     });
 
