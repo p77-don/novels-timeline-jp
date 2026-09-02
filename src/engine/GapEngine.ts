@@ -12,15 +12,15 @@ import { TimelineEvent } from "../types/TimelineTypes";
 import { GapSegment, LayoutNode } from "../types/TimelineTypes";
 import { CalendarSettings } from "../types/TimelineTypes";
 import { calcYearDays } from "../settings/PluginSettings";
-import { GAP_MIN_DAYS, estimateNodePillWidth } from "./LayoutEngine";
+import { GAP_MIN_DAYS } from "./LayoutEngine";
 
 /** Gap1件を構成するのに必要な最小情報 */
 interface GapInput {
   before: TimelineEvent;
   after: TimelineEvent;
-  /** 時間軸（横軸）上のSVG X座標 */
+  /** 時間軸（縦軸）上のSVG Y座標 */
   yBefore: number;
-  /** 時間軸（横軸）上のSVG X座標 */
+  /** 時間軸（縦軸）上のSVG Y座標 */
   yAfter: number;
 }
 
@@ -49,7 +49,7 @@ export class GapEngine {
    * ソート済みイベント一覧と各イベントのY座標から Gap を生成する
    *
    * @param sortedEvents  timelineOrder 昇順でソート済みのイベント
-   * @param yPositions    イベントID → SVG X座標（時間軸位置）のマップ
+   * @param yPositions    イベントID → SVG Y座標（時間軸位置）のマップ
    * @param threshold     Gap生成条件（日数相当値）
    */
   buildGaps(
@@ -81,17 +81,17 @@ export class GapEngine {
   }
 
   // ----------------------------------------------------------
-  // Gap の位置（時間軸X座標）をノードの実描画位置で更新する
+  // Gap の位置（時間軸Y座標）をノードの実描画位置で更新する
   // ----------------------------------------------------------
 
   /**
    * buildGaps() 後、LayoutEngine.buildLayout() で確定した LayoutNode 一覧を使って
-   * 各 Gap の表示位置（実体はX座標）を更新する。
+   * 各 Gap の表示位置（Y座標）を更新する。
    *
-   * ノードは「左端(node.x)が時間軸の日付起点」となるよう描画されるため、
-   * Gapの中心は
-   *   前イベントノードの【右端】(x + 描画幅) 〜 後イベントノードの【左端】(x)
-   * の中間点として算出する。単純に両ノードの x（左端同士）の中間点を取ると、
+   * ノードは「上端(node.y)が時間軸の日付起点、radius分だけ上下に占有」となるよう
+   * 描画されるため、Gapの中心は
+   *   前イベントノードの【下端】(y + radius) 〜 後イベントノードの【上端】(y - radius)
+   * の中間点として算出する。単純に両ノードの y（上端同士）の中間点を取ると、
    * 前イベントノードの描画範囲にGapが重なって見えてしまうため注意する。
    */
   updateGapYPositions(gaps: GapSegment[], nodes: LayoutNode[]): void {
@@ -107,11 +107,11 @@ export class GapEngine {
       const toNode   = orderToNode.get(gap.toOrder);
       if (!fromNode || !toNode) continue;
 
-      const fromRightEdge = fromNode.x + estimateNodePillWidth(fromNode.event, fromNode.radius);
-      const toLeftEdge    = toNode.x;
+      const fromBottomEdge = fromNode.y + fromNode.radius;
+      const toTopEdge       = toNode.y - toNode.radius;
 
-      // Gapの表示位置は「前ノードの右端」〜「後ノードの左端」の中間点
-      gap.y = (fromRightEdge + toLeftEdge) / 2;
+      // Gapの表示位置は「前ノードの下端」〜「後ノードの上端」の中間点
+      gap.y = (fromBottomEdge + toTopEdge) / 2;
     }
   }
 

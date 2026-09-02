@@ -64,7 +64,7 @@ export interface TimelineEvent {
    */
   timelineOrder: number;
 
-  /** レーン番号（1〜10）。時間軸は横軸となり、レーンは縦方向の行として扱われる */
+  /** レーン番号（1〜設定値 laneCount）。時間軸は縦軸、レーンは時間軸右側の横方向の列として扱われる */
   lane: number;
 
   /** ノードの形状（NTJP_node フィールドに対応） */
@@ -151,11 +151,11 @@ export interface TimelineCache {
 /** 描画座標付きイベント */
 export interface LayoutNode {
   event: TimelineEvent;
-  /** SVG上のX座標 */
+  /** SVG上のX座標（レーン列の中心） */
   x: number;
-  /** SVG上のY座標（timelineOrderに基づく） */
+  /** SVG上のY座標（timelineOrderに基づく時間軸上の位置・ノード上端） */
   y: number;
-  /** ノードの実描画半径（size × スケール） */
+  /** ノードの実描画半径（size × スケール。時間軸方向の半径として使用） */
   radius: number;
 }
 
@@ -165,11 +165,7 @@ export interface GapSegment {
   fromOrder: number;
   /** Gap直後のイベントのtimelineOrder */
   toOrder: number;
-  /**
-   * 時間軸上のSVG座標（Gap表示位置）。
-   * 時間軸は横軸のため、実体は「SVG X座標」である
-   * （フィールド名 y は互換性のため維持）。
-   */
+  /** 時間軸上のSVG Y座標（Gap表示位置） */
   y: number;
   /** 差分の表示文字列 例: "3年", "2か月", "5日" */
   label: string;

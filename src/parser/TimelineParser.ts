@@ -179,7 +179,9 @@ export class TimelineParser {
       displayTitle: this.parseTitleField(frontmatter[NTJP_KEYS.eventTitle], legacyDisplayTitle),
       date,
       timelineOrder,
-      lane: this.parseIntField(frontmatter[NTJP_KEYS.lane], 1, 1, 10),
+      // レーン数（laneCount）は設定で可変のため、ここでは異常値のみ弾く安全上限とする。
+      // 実効的な上限クランプは描画時（LayoutEngine.findFreeLane）が設定値で行う。
+      lane: this.parseIntField(frontmatter[NTJP_KEYS.lane], 1, 1, 9999),
       size: this.parseSizeField(frontmatter[NTJP_KEYS.node]),
       color: this.parseColorField(frontmatter[NTJP_KEYS.colors]),
       characters: this.parseStringArray(frontmatter[NTJP_KEYS.characters]),

@@ -1,13 +1,17 @@
 // ============================================================
 // TimelineRenderer.ts
-// Novels Timeline JP — SVG 描画エンジン（横軸タイムライン版）
+// Novels Timeline JP — SVG 描画エンジン（縦軸タイムライン版）
 //
-// v2 変更点:
-//   ・時間軸を縦軸から横軸へ変更（X=時間, Y=レーン）
-//   ・ノードは「●」ではなく「日にち」を表示するカプセル型バッジに変更
-//   ・時間軸ルーラーは年・月のみを表示し、日は表示しない
-//     （日はノード自体に表示されるため）
-//   ・レーンは 1〜10 の固定行。左レーン／右レーンの概念とタイトル設定は廃止
+// v3 変更点:
+//   ・時間軸を横軸から縦軸へ変更（Y=時間, X=レーン）
+//   ・時間軸は左寄せ配置。列の並びは左から
+//     [年][月][GAP][レーン1]...[レーンN]
+//   ・上部にレーン番号の固定ヘッダー行（スクロール追従・上部固定）
+//   ・左側に年・月・GAPの固定列（スクロール追従・左端固定）
+//   ・ノードは「●」ではなく「日にち」を表示するカプセル型バッジ。
+//     時間軸方向(Y)の占有幅はサイズ(radius)由来の固定値、
+//     レーン方向(X)の占有幅はテキスト長に応じるがレーン列幅にクランプする。
+//   ・レーン数は設定値（laneCount）で可変。
 // ============================================================
 
 import {
@@ -20,7 +24,7 @@ import { NovelsTimelineSettings } from "../settings/PluginSettings";
 import { Tooltip }     from "./Tooltip";
 import { GapRenderer } from "./GapRenderer";
 import { TimelineEvent } from "../types/TimelineTypes";
-import { LANE_MIN, LANE_MAX, LANE_COUNT, ROW_HEIGHT, HEADER_HEIGHT, GAP_ROW_HEIGHT, LANES_START_Y, LANE_LABEL_W, GAP_SLOT_WIDTH, EXPANDED_MIN_WIDTH, EXPANDED_PX_PER_DAY, dayLabelForEvent, estimateNodeFontSize, estimateNodePillWidth } from "../engine/LayoutEngine";
+import { LANE_MIN, LANE_COL_W, HEADER_H, YEAR_COL_W, MONTH_COL_W, GAP_COL_W, LANES_START_X, AXIS_X, GAP_SLOT_HEIGHT, EXPANDED_MIN_HEIGHT, EXPANDED_PX_PER_DAY, dayLabelForEvent, estimateNodeFontSize, estimateNodePillWidth } from "../engine/LayoutEngine";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -33,11 +37,11 @@ const COLOR = {
 } as const;
 
 // ----------------------------------------------------------
-// 時間軸ルーラーに描画する1列分の日付情報
+// 時間軸ルーラー（左側固定列）に描画する1行分の日付情報
 // ----------------------------------------------------------
 
 export interface DateRow {
-  x:              number;   // SVG X座標（時間軸上の位置）
+  y:              number;   // SVG Y座標（時間軸上の位置）
   day:            number;   // 日（ノード側に表示するため保持のみ）
   month:          number;   // 月番号（例: 5）
   year:           number;   // 年（例: 1345）
@@ -52,22 +56,21 @@ export interface RenderContext {
   filteredIds:   Set<string> | null;
   selectedId:    string | null;
   settings:      NovelsTimelineSettings;
+  /** SVG全体の幅(px)。レーン数（設定値）にのみ依存する固定値。 */
   totalWidth:    number;
+  /** SVG全体の高さ(px)。イベントの時間軸配置に応じて動的に変化する。 */
+  totalHeight:   number;
   virtualWindow: VirtualWindow;
   dateRows:      DateRow[];
   onNodeClick:   (event: TimelineEvent, node: LayoutNode, mouseX: number, mouseY: number) => void;
   onNodeHover:   (event: TimelineEvent, node: LayoutNode, mouseX: number, mouseY: number) => void;
   onNodeLeave:   () => void;
   onGapClick:    (gap: GapSegment) => void;
-  onContextMenu: (svgX: number, mouseX: number, mouseY: number, lane: number) => void;
+  /** svgY = クリック位置の時間軸座標（日付逆算に使用）、lane = クリック位置のレーン番号 */
+  onContextMenu: (svgY: number, mouseX: number, mouseY: number, lane: number) => void;
   onLaneDrop:    (eventId: string, newLane: number) => void;
   /** イベントの color フィールド（配色セットIDまたは生HEX値）を実色に解決する */
   resolveNodeColors: (event: TimelineEvent) => { nodeColor: string; textColor: string };
-}
-
-/** render() 内部でのみ使用する、時間軸Y座標を加えた拡張コンテキスト */
-interface InternalRenderContext extends RenderContext {
-  axisY: number;
 }
 
 export class TimelineRenderer {
@@ -75,15 +78,15 @@ export class TimelineRenderer {
   private container:   HTMLElement;
   private tooltip:     Tooltip;
   private gapRenderer: GapRenderer;
-  private _lastLanesStartY = LANES_START_Y; // render() で更新、drag時に参照
+  private _lastLaneCount = 10; // render() で更新、drag時に参照
 
   private dragState: {
     active:   boolean;
     eventId:  string;
-    startY:   number;
+    startX:   number;
     circle:   SVGGElement | null;
     originalLane: number;
-  } = { active: false, eventId: "", startY: 0, circle: null, originalLane: 1 };
+  } = { active: false, eventId: "", startX: 0, circle: null, originalLane: 1 };
 
   constructor(container: HTMLElement) {
     this.container   = container;
@@ -99,141 +102,142 @@ export class TimelineRenderer {
   // ----------------------------------------------------------
 
   render(ctx: RenderContext): void {
-    const { settings, totalWidth, virtualWindow } = ctx;
+    const { settings, totalWidth, totalHeight, virtualWindow } = ctx;
 
-    const headerH    = HEADER_HEIGHT;
-    const gapRowH    = GAP_ROW_HEIGHT;
-    const lanesStartY = LANES_START_Y;
-    const rowH       = ROW_HEIGHT;
-    const lanes      = LANE_COUNT;
-    const axisY      = headerH; // 時間軸（水平線）の位置
-    const svgHeight  = lanesStartY + lanes * rowH + 24;
-    this._lastLanesStartY = lanesStartY;
+    const laneCount  = Math.max(LANE_MIN, settings.laneCount);
+    const headerH    = HEADER_H;
+    const gapColW    = GAP_COL_W;
+    const lanesStartX = LANES_START_X;
+    const colW       = LANE_COL_W;
+    const axisX      = AXIS_X; // 時間軸（垂直線）の位置
+    this._lastLaneCount = laneCount;
 
-    this.svg.setAttribute("viewBox", `0 0 ${totalWidth} ${svgHeight}`);
+    this.svg.setAttribute("viewBox", `0 0 ${totalWidth} ${totalHeight}`);
     this.svg.setAttribute("width",   String(totalWidth));
-    this.svg.setAttribute("height",  String(svgHeight));
-    // イベント数・レーン幅から毎回計算するボード全体の幅（動的な値）のため、
+    this.svg.setAttribute("height",  String(totalHeight));
+    // レーン数（設定値）から毎回計算するボード全体の幅・イベント配置から
+    // 動的に決まる高さ（いずれも実行時にしか決まらない値）のため、
     // CSSクラス化はできずインライン指定を許容する。
-    this.svg.style.minWidth = `${totalWidth}px`;
+    this.svg.style.minWidth  = `${totalWidth}px`;
+    this.svg.style.minHeight = `${totalHeight}px`;
 
     while (this.svg.firstChild) this.svg.removeChild(this.svg.firstChild);
 
-    const buffer    = settings.virtualRendering ? virtualWindow.buffer : Infinity;
+    const buffer   = settings.virtualRendering ? virtualWindow.buffer : Infinity;
+    const visTop    = virtualWindow.scrollTop  - buffer;
+    const visBottom = virtualWindow.scrollTop  + virtualWindow.viewportHeight + buffer;
     const visLeft   = virtualWindow.scrollLeft - buffer;
-    const visRight  = virtualWindow.scrollLeft + virtualWindow.viewportWidth + buffer;
+    const visRight  = virtualWindow.scrollLeft + virtualWindow.viewportWidth  + buffer;
 
     const defs = document.createElementNS(SVG_NS, "defs");
     this.svg.appendChild(defs);
 
-    const ctxWithAxis: InternalRenderContext = { ...ctx, axisY };
-
-    // ① レーン行の背景（縞模様）と区切り線
-    this.drawLaneRows(totalWidth, lanesStartY, rowH, lanes);
-    // ② GAP専用レーンの背景（時間軸とイベントレーンの間）
-    this.drawGapRowBackground(totalWidth, axisY, gapRowH);
-    // ③ 時間軸（水平線）
-    this.drawTimeAxis(axisY, totalWidth);
-    // ④ Gap（GAP専用レーン内に表示）
+    // ① レーン列の背景（縞模様）と区切り線
+    this.drawLaneColumns(totalHeight, lanesStartX, colW, laneCount);
+    // ② GAP専用列の背景（月列とレーン列の間）
+    this.drawGapColumnBackground(totalHeight, axisX, gapColW);
+    // ③ 時間軸（垂直線）
+    this.drawTimeAxis(axisX, totalHeight);
+    // ④ Gap（GAP専用列内に表示）
     if (settings.gapCompression) {
-      this.drawGaps(ctxWithAxis, visLeft, visRight, axisY, gapRowH);
+      this.drawGaps(ctx, visTop, visBottom, axisX, gapColW);
     }
     // ⑤ 関係線（ノードより先に描画）
-    this.drawRelations(ctxWithAxis, visLeft, visRight, defs);
+    this.drawRelations(ctx, visTop, visBottom);
     // ⑥ ノード（日にちバッジ）
-    this.drawNodes(ctxWithAxis, visLeft, visRight);
-    // ⑦ 日付ルーラー（年・月のみ・スクロール追従で上部固定）
-    this.drawDateRuler(ctxWithAxis, visLeft, visRight);
-    // ⑧ レーン番号ラベル（左側固定列・スクロール追従。GAP行も含む）
-    this.drawLaneLabelColumn(axisY, gapRowH, rowH, lanes, virtualWindow.scrollLeft);
-    // ⑨ 左上コーナー（暦名）
-    this.drawCornerBox(virtualWindow.scrollLeft, virtualWindow.scrollTop, headerH);
+    this.drawNodes(ctx, visTop, visBottom, visLeft, visRight);
+    // ⑦ 年・月ラベル（左側固定列・スクロール追従で常に左端固定表示）
+    this.drawDateColumn(ctx, visTop, visBottom, virtualWindow.scrollLeft);
+    // ⑧ レーン番号ヘッダー行（上部固定・スクロール追従）
+    this.drawLaneHeaderRow(lanesStartX, colW, laneCount, headerH, virtualWindow.scrollTop);
+    // ⑨ 左上コーナー（年・月・GAP 列見出し・上下左右どちらのスクロールにも追従）
+    this.drawCornerHeader(virtualWindow.scrollLeft, virtualWindow.scrollTop, headerH, settings.calendar.name ?? "");
 
     this.svg.oncontextmenu = (e: MouseEvent) => {
       e.preventDefault();
       // clientXToSvgX() / clientYToSvgY() は getScreenCTM() 経由でボードズームを含む
       // 実際の描画スケールを考慮してSVGユーザー座標へ変換する。
       // （e.offsetX/e.offsetY はズーム時にスケールされた値になるため使用不可）
-      const svgY = this.clientYToSvgY(e.clientY);
-      const lane = this.svgYToLane(svgY, this._lastLanesStartY);
-      ctx.onContextMenu(this.clientXToSvgX(e.clientX), e.clientX, e.clientY, lane);
+      const svgX = this.clientXToSvgX(e.clientX);
+      const lane = this.svgXToLane(svgX, laneCount);
+      ctx.onContextMenu(this.clientYToSvgY(e.clientY), e.clientX, e.clientY, lane);
     };
     this.svg.onmousemove = (e: MouseEvent) => {
       this.tooltip.move(e.clientX, e.clientY);
-      this.onDragMove(e, ctxWithAxis);
+      this.onDragMove(e, ctx);
     };
-    this.svg.onmouseup = (e: MouseEvent) => this.onDragEnd(e, ctxWithAxis);
+    this.svg.onmouseup = (e: MouseEvent) => this.onDragEnd(e, ctx);
   }
 
   // ----------------------------------------------------------
-  // GAP専用レーンの背景（時間軸とイベントレーンの間の帯）
+  // GAP専用列の背景（時間軸とレーン列の間の帯）
   // ----------------------------------------------------------
 
-  private drawGapRowBackground(totalWidth: number, axisY: number, gapRowH: number): void {
+  private drawGapColumnBackground(totalHeight: number, axisX: number, gapColW: number): void {
     const bg = document.createElementNS(SVG_NS, "rect");
-    bg.setAttribute("x",      "0");
-    bg.setAttribute("y",      String(axisY));
-    bg.setAttribute("width",  String(totalWidth));
-    bg.setAttribute("height", String(gapRowH));
+    bg.setAttribute("x",      String(axisX));
+    bg.setAttribute("y",      "0");
+    bg.setAttribute("width",  String(gapColW));
+    bg.setAttribute("height", String(totalHeight));
     bg.setAttribute("fill",   "var(--background-secondary-alt)");
     bg.setAttribute("fill-opacity", "0.4");
     this.svg.appendChild(bg);
 
-    const bottomLine = document.createElementNS(SVG_NS, "line");
-    bottomLine.setAttribute("x1", "0");
-    bottomLine.setAttribute("y1", String(axisY + gapRowH));
-    bottomLine.setAttribute("x2", String(totalWidth));
-    bottomLine.setAttribute("y2", String(axisY + gapRowH));
-    bottomLine.setAttribute("stroke",       "var(--background-modifier-border)");
-    bottomLine.setAttribute("stroke-width", "0.5");
-    this.svg.appendChild(bottomLine);
+    const rightLine = document.createElementNS(SVG_NS, "line");
+    rightLine.setAttribute("x1", String(axisX + gapColW));
+    rightLine.setAttribute("y1", "0");
+    rightLine.setAttribute("x2", String(axisX + gapColW));
+    rightLine.setAttribute("y2", String(totalHeight));
+    rightLine.setAttribute("stroke",       "var(--background-modifier-border)");
+    rightLine.setAttribute("stroke-width", "0.5");
+    this.svg.appendChild(rightLine);
   }
 
   // ----------------------------------------------------------
-  // レーン行の背景（縞模様）と区切り線
+  // レーン列の背景（縞模様）と区切り線
   // ----------------------------------------------------------
 
-  private drawLaneRows(totalWidth: number, lanesStartY: number, rowH: number, lanes: number): void {
+  private drawLaneColumns(totalHeight: number, lanesStartX: number, colW: number, lanes: number): void {
     for (let i = 0; i < lanes; i++) {
-      const y = lanesStartY + i * rowH;
+      const x = lanesStartX + i * colW;
 
       if (i % 2 === 1) {
         const bg = document.createElementNS(SVG_NS, "rect");
-        bg.setAttribute("x",      "0");
-        bg.setAttribute("y",      String(y));
-        bg.setAttribute("width",  String(totalWidth));
-        bg.setAttribute("height", String(rowH));
+        bg.setAttribute("x",      String(x));
+        bg.setAttribute("y",      "0");
+        bg.setAttribute("width",  String(colW));
+        bg.setAttribute("height", String(totalHeight));
         bg.setAttribute("fill",   "var(--background-secondary)");
         bg.setAttribute("fill-opacity", "0.5");
         this.svg.appendChild(bg);
       }
 
       const line = document.createElementNS(SVG_NS, "line");
-      line.setAttribute("x1", "0");
-      line.setAttribute("y1", String(y));
-      line.setAttribute("x2", String(totalWidth));
-      line.setAttribute("y2", String(y));
+      line.setAttribute("x1", String(x));
+      line.setAttribute("y1", "0");
+      line.setAttribute("x2", String(x));
+      line.setAttribute("y2", String(totalHeight));
       line.setAttribute("stroke",       "var(--background-modifier-border)");
       line.setAttribute("stroke-width", "0.5");
       this.svg.appendChild(line);
     }
-    // 最下段の境界線
-    const bottomY = lanesStartY + lanes * rowH;
-    const bottomLine = document.createElementNS(SVG_NS, "line");
-    bottomLine.setAttribute("x1", "0");
-    bottomLine.setAttribute("y1", String(bottomY));
-    bottomLine.setAttribute("x2", String(totalWidth));
-    bottomLine.setAttribute("y2", String(bottomY));
-    bottomLine.setAttribute("stroke",       "var(--background-modifier-border)");
-    bottomLine.setAttribute("stroke-width", "0.5");
-    this.svg.appendChild(bottomLine);
+    // 右端の境界線
+    const rightX = lanesStartX + lanes * colW;
+    const rightLine = document.createElementNS(SVG_NS, "line");
+    rightLine.setAttribute("x1", String(rightX));
+    rightLine.setAttribute("y1", "0");
+    rightLine.setAttribute("x2", String(rightX));
+    rightLine.setAttribute("y2", String(totalHeight));
+    rightLine.setAttribute("stroke",       "var(--background-modifier-border)");
+    rightLine.setAttribute("stroke-width", "0.5");
+    this.svg.appendChild(rightLine);
   }
 
   // ----------------------------------------------------------
-  // 時間軸（水平線）— 帯背景 + 中央線
+  // 時間軸（垂直線）— 帯背景 + 中央線
   // ----------------------------------------------------------
 
-  private drawTimeAxis(axisY: number, totalWidth: number): void {
+  private drawTimeAxis(axisX: number, totalHeight: number): void {
     let defs = this.svg.querySelector("defs");
     if (!defs) {
       defs = document.createElementNS(SVG_NS, "defs");
@@ -246,8 +250,8 @@ export class TimelineRenderer {
       grad.setAttribute("id",  gradId);
       grad.setAttribute("x1",  "0%");
       grad.setAttribute("y1",  "0%");
-      grad.setAttribute("x2",  "0%");
-      grad.setAttribute("y2",  "100%");
+      grad.setAttribute("x2",  "100%");
+      grad.setAttribute("y2",  "0%");
       for (const [offset, opacity] of [["0%","0"],["50%","0.12"],["100%","0"]]) {
         const stop = document.createElementNS(SVG_NS, "stop");
         stop.setAttribute("offset",      offset);
@@ -260,19 +264,19 @@ export class TimelineRenderer {
 
     // 帯背景
     const band = document.createElementNS(SVG_NS, "rect");
-    band.setAttribute("x",      "0");
-    band.setAttribute("y",      String(axisY - 8));
-    band.setAttribute("width",  String(totalWidth));
-    band.setAttribute("height", "16");
+    band.setAttribute("x",      String(axisX - 8));
+    band.setAttribute("y",      "0");
+    band.setAttribute("width",  "16");
+    band.setAttribute("height", String(totalHeight));
     band.setAttribute("fill",   `url(#${gradId})`);
     this.svg.appendChild(band);
 
-    // 中央横線（メイン）
+    // 中央縦線（メイン）
     const line = document.createElementNS(SVG_NS, "line");
-    line.setAttribute("x1",           "0");
-    line.setAttribute("y1",           String(axisY));
-    line.setAttribute("x2",           String(totalWidth));
-    line.setAttribute("y2",           String(axisY));
+    line.setAttribute("x1",           String(axisX));
+    line.setAttribute("y1",           "0");
+    line.setAttribute("x2",           String(axisX));
+    line.setAttribute("y2",           String(totalHeight));
     line.setAttribute("stroke",       "var(--interactive-accent)");
     line.setAttribute("stroke-width", "1.5");
     line.setAttribute("stroke-opacity", "0.5");
@@ -280,61 +284,68 @@ export class TimelineRenderer {
   }
 
   // ----------------------------------------------------------
-  // 日付ルーラー（年・月のみ。スクロール追従で常に上部固定表示）
+  // 年・月ラベル（左側固定列。スクロール追従で常に左端固定表示）
   // ----------------------------------------------------------
 
-  private drawDateRuler(ctx: InternalRenderContext, visLeft: number, visRight: number): void {
-    const { dateRows, virtualWindow, axisY } = ctx;
+  private drawDateColumn(
+    ctx: RenderContext, visTop: number, visBottom: number, scrollLeft: number
+  ): void {
+    const { dateRows, virtualWindow } = ctx;
+
+    // 背景（年・月列）— レーン内容が透けて見えないようにする
+    const bg = document.createElementNS(SVG_NS, "rect");
+    bg.setAttribute("x",      String(scrollLeft));
+    bg.setAttribute("y",      "0");
+    bg.setAttribute("width",  String(YEAR_COL_W + MONTH_COL_W));
+    bg.setAttribute("height", String(ctx.totalHeight));
+    bg.setAttribute("fill",   "var(--background-primary-alt)");
+    this.svg.appendChild(bg);
+
     if (dateRows.length === 0) return;
 
-    const stickyY = virtualWindow.scrollTop; // 上部固定の基準Y
+    const stickyX = scrollLeft; // 左端固定の基準X
+    void virtualWindow;
 
     let prevYear  = -1;
     let prevMonth = -1;
 
     for (const row of dateRows) {
-      if (row.x < visLeft - 60 || row.x > visRight + 60) {
+      if (row.y < visTop - 60 || row.y > visBottom + 60) {
         prevYear  = row.year;
         prevMonth = row.month;
         continue;
       }
 
       if (row.year !== prevYear) {
-        this.drawYearCard(row.year, row.x, stickyY, axisY);
+        this.drawYearCell(row.year, row.y, stickyX);
         prevYear  = row.year;
         prevMonth = -1;
       }
 
       if (row.month !== prevMonth) {
-        this.drawMonthBadge(row.monthLabel, row.x, stickyY);
+        this.drawMonthCell(row.monthLabel, row.y, stickyX);
         prevMonth = row.month;
       }
     }
   }
 
-  /**
-   * 年表示（枠なし）。
-   * 区切り線は時間軸（axisY）までで終わり、GAPレーンやイベントレーンへは伸ばさない。
-   * （月の区切り線と重なって実線のように見えてしまうのを防ぐため）
-   */
-  private drawYearCard(year: number, x: number, stickyY: number, axisY: number): void {
+  /** 年表示（枠なし・年列の幅ぶんだけ区切り線を引く） */
+  private drawYearCell(year: number, y: number, stickyX: number): void {
     const label = `${year}年`;
-    const textY = stickyY + 14;
 
-    // 区切り線（年の境界）— 年ラベルの位置から時間軸までのみ縦線でつなぐ
     const line = document.createElementNS(SVG_NS, "line");
-    line.setAttribute("x1",           String(x));
-    line.setAttribute("y1",           String(stickyY + 4));
-    line.setAttribute("x2",           String(x));
-    line.setAttribute("y2",           String(axisY));
+    line.setAttribute("x1",           String(stickyX + 4));
+    line.setAttribute("y1",           String(y));
+    line.setAttribute("x2",           String(stickyX + YEAR_COL_W));
+    line.setAttribute("y2",           String(y));
     line.setAttribute("stroke",       "var(--text-muted)");
     line.setAttribute("stroke-width", "1");
     line.setAttribute("stroke-opacity", "0.4");
     this.svg.appendChild(line);
 
     const text = document.createElementNS(SVG_NS, "text");
-    text.setAttribute("x",                 String(x + 5));
-    text.setAttribute("y",                 String(textY));
+    text.setAttribute("x",                 String(stickyX + 5));
+    text.setAttribute("y",                 String(y - 6));
     text.setAttribute("text-anchor",       "start");
     text.setAttribute("dominant-baseline", "central");
     text.setAttribute("font-size",         "12");
@@ -344,16 +355,15 @@ export class TimelineRenderer {
     this.svg.appendChild(text);
   }
 
-  /** 月表示（枠なし・時間軸へ縦線でつなぐ） */
-  private drawMonthBadge(monthLabel: string, x: number, stickyY: number): void {
-    const textY = stickyY + 34;
+  /** 月表示（枠なし・月列の幅ぶんだけ区切り線を引く） */
+  private drawMonthCell(monthLabel: string, y: number, stickyX: number): void {
+    const colX = stickyX + YEAR_COL_W;
 
-    // 区切り線（月の境界）— 月ラベルの位置から時間軸（および下方）まで縦線でつなぐ
     const line = document.createElementNS(SVG_NS, "line");
-    line.setAttribute("x1",               String(x));
-    line.setAttribute("y1",               String(stickyY + 24));
-    line.setAttribute("x2",               String(x));
-    line.setAttribute("y2",               "9999");
+    line.setAttribute("x1",               String(colX));
+    line.setAttribute("y1",               String(y));
+    line.setAttribute("x2",               String(colX + MONTH_COL_W));
+    line.setAttribute("y2",               String(y));
     line.setAttribute("stroke",           "var(--text-muted)");
     line.setAttribute("stroke-width",     "0.6");
     line.setAttribute("stroke-opacity",   "0.25");
@@ -361,8 +371,8 @@ export class TimelineRenderer {
     this.svg.appendChild(line);
 
     const text = document.createElementNS(SVG_NS, "text");
-    text.setAttribute("x",                 String(x + 5));
-    text.setAttribute("y",                 String(textY));
+    text.setAttribute("x",                 String(colX + 5));
+    text.setAttribute("y",                 String(y - 6));
     text.setAttribute("text-anchor",       "start");
     text.setAttribute("dominant-baseline", "central");
     text.setAttribute("font-size",         "10");
@@ -373,104 +383,134 @@ export class TimelineRenderer {
   }
 
   // ----------------------------------------------------------
-  // レーン番号ラベル（左側固定列。スクロール追従で常に左端固定表示）
+  // レーン番号ヘッダー行（上部固定。スクロール追従で常に上端固定表示）
   // ----------------------------------------------------------
 
-  private drawLaneLabelColumn(
-    axisY: number, gapRowH: number, rowH: number, lanes: number, scrollLeft: number
+  private drawLaneHeaderRow(
+    lanesStartX: number, colW: number, lanes: number, headerH: number, scrollTop: number
   ): void {
-    const colX        = scrollLeft;
-    const lanesStartY = axisY + gapRowH;
+    const rowY = scrollTop;
 
-    // ── 背景（GAP行 + レーン1〜10行）──
+    // ── 背景（レーン1〜N列ぶん）──
     const bg = document.createElementNS(SVG_NS, "rect");
-    bg.setAttribute("x",      String(colX));
-    bg.setAttribute("y",      String(axisY));
-    bg.setAttribute("width",  String(LANE_LABEL_W));
-    bg.setAttribute("height", String(gapRowH + lanes * rowH));
-    bg.setAttribute("fill",   "var(--background-primary-alt)");
-    this.svg.appendChild(bg);
-
-    // ── GAP専用レーンのラベル ──
-    const gapLabelY = axisY + gapRowH / 2;
-    const gapText = document.createElementNS(SVG_NS, "text");
-    gapText.setAttribute("x",                 String(colX + LANE_LABEL_W / 2));
-    gapText.setAttribute("y",                 String(gapLabelY));
-    gapText.setAttribute("text-anchor",       "middle");
-    gapText.setAttribute("dominant-baseline", "central");
-    gapText.setAttribute("font-size",         "10");
-    gapText.setAttribute("font-weight",       "600");
-    gapText.setAttribute("fill",              "var(--text-muted)");
-    gapText.setAttribute("letter-spacing",    "0.5");
-    gapText.textContent = "GAP";
-    this.svg.appendChild(gapText);
-
-    // GAP行とレーン1の間の境界線
-    const gapDivider = document.createElementNS(SVG_NS, "line");
-    gapDivider.setAttribute("x1", String(colX));
-    gapDivider.setAttribute("y1", String(lanesStartY));
-    gapDivider.setAttribute("x2", String(colX + LANE_LABEL_W));
-    gapDivider.setAttribute("y2", String(lanesStartY));
-    gapDivider.setAttribute("stroke",       "var(--background-modifier-border)");
-    gapDivider.setAttribute("stroke-width", "1");
-    this.svg.appendChild(gapDivider);
-
-    // ── レーン番号(1〜10) ──
-    for (let i = 0; i < lanes; i++) {
-      const lane = LANE_MIN + i;
-      const y    = lanesStartY + i * rowH + rowH / 2;
-
-      const text = document.createElementNS(SVG_NS, "text");
-      text.setAttribute("x",                 String(colX + LANE_LABEL_W / 2));
-      text.setAttribute("y",                 String(y));
-      text.setAttribute("text-anchor",       "middle");
-      text.setAttribute("dominant-baseline", "central");
-      text.setAttribute("font-size",         "13");
-      text.setAttribute("fill",              "var(--text-muted)");
-      text.textContent = String(lane);
-      this.svg.appendChild(text);
-    }
-
-    // 右端の縦境界線
-    const rline = document.createElementNS(SVG_NS, "line");
-    rline.setAttribute("x1", String(colX + LANE_LABEL_W));
-    rline.setAttribute("y1", String(axisY));
-    rline.setAttribute("x2", String(colX + LANE_LABEL_W));
-    rline.setAttribute("y2", String(lanesStartY + lanes * rowH));
-    rline.setAttribute("stroke",       "var(--background-modifier-border)");
-    rline.setAttribute("stroke-width", "1");
-    this.svg.appendChild(rline);
-  }
-
-  /** 左上コーナー（暦名を表示。上下左右どちらのスクロールにも追従して固定表示） */
-  private drawCornerBox(scrollLeft: number, scrollTop: number, headerH: number): void {
-    const bg = document.createElementNS(SVG_NS, "rect");
-    bg.setAttribute("x",      String(scrollLeft));
-    bg.setAttribute("y",      String(scrollTop));
-    bg.setAttribute("width",  String(LANE_LABEL_W));
+    bg.setAttribute("x",      String(lanesStartX));
+    bg.setAttribute("y",      String(rowY));
+    bg.setAttribute("width",  String(lanes * colW));
     bg.setAttribute("height", String(headerH));
     bg.setAttribute("fill",   "var(--background-primary-alt)");
     this.svg.appendChild(bg);
 
-    const border = document.createElementNS(SVG_NS, "line");
-    border.setAttribute("x1", String(scrollLeft));
-    border.setAttribute("y1", String(scrollTop + headerH));
-    border.setAttribute("x2", String(scrollLeft + LANE_LABEL_W));
-    border.setAttribute("y2", String(scrollTop + headerH));
-    border.setAttribute("stroke",       "var(--background-modifier-border)");
-    border.setAttribute("stroke-width", "1");
-    this.svg.appendChild(border);
+    // ── レーン番号(1〜lanes) ──
+    for (let i = 0; i < lanes; i++) {
+      const lane = LANE_MIN + i;
+      const x    = lanesStartX + i * colW + colW / 2;
+
+      const text = document.createElementNS(SVG_NS, "text");
+      text.setAttribute("x",                 String(x));
+      text.setAttribute("y",                 String(rowY + headerH / 2));
+      text.setAttribute("text-anchor",       "middle");
+      text.setAttribute("dominant-baseline", "central");
+      text.setAttribute("font-size",         "12");
+      text.setAttribute("fill",              "var(--text-muted)");
+      text.textContent = `レーン${lane}`;
+      this.svg.appendChild(text);
+    }
+
+    // 下端の横境界線
+    const bline = document.createElementNS(SVG_NS, "line");
+    bline.setAttribute("x1", String(lanesStartX));
+    bline.setAttribute("y1", String(rowY + headerH));
+    bline.setAttribute("x2", String(lanesStartX + lanes * colW));
+    bline.setAttribute("y2", String(rowY + headerH));
+    bline.setAttribute("stroke",       "var(--background-modifier-border)");
+    bline.setAttribute("stroke-width", "1");
+    this.svg.appendChild(bline);
+  }
+
+  /**
+   * 左上コーナー（年・月・GAP列の見出しを表示。
+   * 上下左右どちらのスクロールにも追従して固定表示する）
+   */
+  private drawCornerHeader(
+    scrollLeft: number, scrollTop: number, headerH: number, calendarName: string
+  ): void {
+    const bg = document.createElementNS(SVG_NS, "rect");
+    bg.setAttribute("x",      String(scrollLeft));
+    bg.setAttribute("y",      String(scrollTop));
+    bg.setAttribute("width",  String(LANES_START_X));
+    bg.setAttribute("height", String(headerH));
+    bg.setAttribute("fill",   "var(--background-primary-alt)");
+    this.svg.appendChild(bg);
+
+    if (calendarName) {
+      const title = document.createElementNS(SVG_NS, "title");
+      title.textContent = calendarName;
+      bg.appendChild(title);
+    }
+
+    const cells: Array<{ label: string; x: number; w: number }> = [
+      { label: "年",   x: scrollLeft,                          w: YEAR_COL_W },
+      { label: "月",   x: scrollLeft + YEAR_COL_W,              w: MONTH_COL_W },
+      { label: "GAP",  x: scrollLeft + YEAR_COL_W + MONTH_COL_W, w: GAP_COL_W },
+    ];
+
+    for (const cell of cells) {
+      const text = document.createElementNS(SVG_NS, "text");
+      text.setAttribute("x",                 String(cell.x + cell.w / 2));
+      text.setAttribute("y",                 String(scrollTop + headerH / 2));
+      text.setAttribute("text-anchor",       "middle");
+      text.setAttribute("dominant-baseline", "central");
+      text.setAttribute("font-size",         "10");
+      text.setAttribute("font-weight",       "600");
+      text.setAttribute("fill",              "var(--text-muted)");
+      text.setAttribute("letter-spacing",    "0.5");
+      text.textContent = cell.label;
+      this.svg.appendChild(text);
+
+      const divider = document.createElementNS(SVG_NS, "line");
+      divider.setAttribute("x1", String(cell.x));
+      divider.setAttribute("y1", String(scrollTop));
+      divider.setAttribute("x2", String(cell.x));
+      divider.setAttribute("y2", String(scrollTop + headerH));
+      divider.setAttribute("stroke",       "var(--background-modifier-border)");
+      divider.setAttribute("stroke-width", "0.6");
+      this.svg.appendChild(divider);
+    }
+
+    // 下端・右端の境界線
+    const bline = document.createElementNS(SVG_NS, "line");
+    bline.setAttribute("x1", String(scrollLeft));
+    bline.setAttribute("y1", String(scrollTop + headerH));
+    bline.setAttribute("x2", String(scrollLeft + LANES_START_X));
+    bline.setAttribute("y2", String(scrollTop + headerH));
+    bline.setAttribute("stroke",       "var(--background-modifier-border)");
+    bline.setAttribute("stroke-width", "1");
+    this.svg.appendChild(bline);
+
+    const rline = document.createElementNS(SVG_NS, "line");
+    rline.setAttribute("x1", String(scrollLeft + LANES_START_X));
+    rline.setAttribute("y1", String(scrollTop));
+    rline.setAttribute("x2", String(scrollLeft + LANES_START_X));
+    rline.setAttribute("y2", String(scrollTop + headerH));
+    rline.setAttribute("stroke",       "var(--background-modifier-border)");
+    rline.setAttribute("stroke-width", "1");
+    this.svg.appendChild(rline);
   }
 
   // ----------------------------------------------------------
   // ノード描画（日にちバッジ）
   // ----------------------------------------------------------
 
-  private drawNodes(ctx: RenderContext, visLeft: number, visRight: number): void {
+  private drawNodes(
+    ctx: RenderContext, visTop: number, visBottom: number, visLeft: number, visRight: number
+  ): void {
     for (const node of ctx.nodes) {
-      const w = this.estimatePillWidth(node);
-      // ノードは左端(node.x)が時間軸の起点。右方向へwidth分だけ描画される。
-      if (node.x + w < visLeft || node.x > visRight) continue;
+      const w = this.estimateClampedPillWidth(node);
+      const h = node.radius * 2;
+      // ノードは中心(node.x)がレーン列の中心。上端(node.y)が時間軸の起点で、
+      // そこから下方向へh分だけ描画される。
+      if (node.y + h < visTop || node.y > visBottom) continue;
+      if (node.x + w / 2 < visLeft || node.x - w / 2 > visRight) continue;
       const isFiltered = ctx.filteredIds !== null && !ctx.filteredIds.has(node.event.id);
       const isSelected = node.event.id === ctx.selectedId;
       this.drawNode(node, isFiltered, isSelected, ctx);
@@ -486,37 +526,40 @@ export class TimelineRenderer {
     return estimateNodeFontSize(node.radius);
   }
 
-  private estimatePillWidth(node: LayoutNode): number {
-    return estimateNodePillWidth(node.event, node.radius);
+  /** レーン列幅にクランプしたノード横幅(px) */
+  private estimateClampedPillWidth(node: LayoutNode): number {
+    const raw = estimateNodePillWidth(node.event, node.radius);
+    const maxW = LANE_COL_W - 8; // レーン列の左右にわずかな余白を残す
+    return Math.min(raw, Math.max(16, maxW));
   }
 
-  /** ノードの視覚上の中心X座標（関係線・ホバー基準などに使用） */
-  private nodeCenterX(node: LayoutNode): number {
-    return node.x + this.estimatePillWidth(node) / 2;
+  /** ノードの視覚上の中心Y座標（関係線・ホバー基準などに使用） */
+  private nodeCenterY(node: LayoutNode): number {
+    return node.y + node.radius;
   }
 
   /**
-   * サイズ別のノード形状を生成する。
+   * サイズ別のノード形状を生成する（縦軸方向に長さを持つ）。
    *   小 (small)  : 長方形
    *   中 (medium) : 楕円形
-   *   大 (big)    : 横長の六角形
+   *   大 (big)    : 横長の六角形（左右が尖る）
    *
-   * @param x       ノード左端のSVG X座標（時間軸上の日付起点）
-   * @param y       ノード中心のSVG Y座標
+   * @param cx      ノード中心のSVG X座標（レーン列の中心）
+   * @param topY    ノード上端のSVG Y座標（時間軸上の日付起点）
    * @param w       ノード全体の幅(px)
    * @param h       ノード全体の高さ(px)
    */
   private buildNodeShape(
-    size: string, x: number, y: number, w: number, h: number,
+    size: string, cx: number, topY: number, w: number, h: number,
     fill: string, fillOpacity: string, stroke: string, strokeWidth: string
   ): SVGElement {
-    const halfH = h / 2;
+    const halfW = w / 2;
 
     if (size === "small") {
       // 長方形
       const rect = document.createElementNS(SVG_NS, "rect");
-      rect.setAttribute("x",      String(x));
-      rect.setAttribute("y",      String(y - halfH));
+      rect.setAttribute("x",      String(cx - halfW));
+      rect.setAttribute("y",      String(topY));
       rect.setAttribute("width",  String(w));
       rect.setAttribute("height", String(h));
       rect.setAttribute("rx",     "1.5");
@@ -525,15 +568,17 @@ export class TimelineRenderer {
     }
 
     if (size === "big") {
-      // 横長の六角形
-      const notch = Math.min(halfH * 0.7, w / 3);
+      // 横長の六角形（左右が尖り、上下辺の左右端に切り欠きを設ける）
+      const halfH  = h / 2;
+      const midY   = topY + halfH;
+      const notch  = Math.min(halfH * 0.7, w / 3);
       const points = [
-        `${x + notch},${y - halfH}`,
-        `${x + w - notch},${y - halfH}`,
-        `${x + w},${y}`,
-        `${x + w - notch},${y + halfH}`,
-        `${x + notch},${y + halfH}`,
-        `${x},${y}`,
+        `${cx - halfW + notch},${topY}`,
+        `${cx + halfW - notch},${topY}`,
+        `${cx + halfW},${midY}`,
+        `${cx + halfW - notch},${topY + h}`,
+        `${cx - halfW + notch},${topY + h}`,
+        `${cx - halfW},${midY}`,
       ].join(" ");
       const hex = document.createElementNS(SVG_NS, "polygon");
       hex.setAttribute("points", points);
@@ -543,10 +588,10 @@ export class TimelineRenderer {
 
     // medium: 楕円形
     const ellipse = document.createElementNS(SVG_NS, "ellipse");
-    ellipse.setAttribute("cx", String(x + w / 2));
-    ellipse.setAttribute("cy", String(y));
-    ellipse.setAttribute("rx", String(w / 2));
-    ellipse.setAttribute("ry", String(halfH));
+    ellipse.setAttribute("cx", String(cx));
+    ellipse.setAttribute("cy", String(topY + h / 2));
+    ellipse.setAttribute("rx", String(halfW));
+    ellipse.setAttribute("ry", String(h / 2));
     this.applyShapeStyle(ellipse, fill, fillOpacity, stroke, strokeWidth);
     return ellipse;
   }
@@ -571,13 +616,12 @@ export class TimelineRenderer {
 
     const text     = this.dayLabel(node);
     const fontSize = this.estimateFontSize(node);
-    const halfH    = node.radius;
-    const w        = this.estimatePillWidth(node);
-    const h        = halfH * 2;
-    const centerX  = node.x + w / 2;
+    const w        = this.estimateClampedPillWidth(node);
+    const h        = node.radius * 2;
+    const centerY  = node.y + h / 2;
     const colors   = ctx.resolveNodeColors(node.event);
 
-    // ノードの左端(node.x)が時間軸上の日付起点と一致するように描画する
+    // ノードの上端(node.y)が時間軸上の日付起点と一致するように描画する
     const shape = this.buildNodeShape(
       node.event.size, node.x, node.y, w, h,
       isFiltered ? COLOR.nodeFiltered : colors.nodeColor,
@@ -590,8 +634,8 @@ export class TimelineRenderer {
     if (!isFiltered) {
       const label = document.createElementNS(SVG_NS, "text");
       label.setAttribute("class",             "ntj-node-label");
-      label.setAttribute("x",                 String(centerX));
-      label.setAttribute("y",                 String(node.y));
+      label.setAttribute("x",                 String(node.x));
+      label.setAttribute("y",                 String(centerY));
       label.setAttribute("text-anchor",       "middle");
       label.setAttribute("dominant-baseline", "central");
       label.setAttribute("font-size",         String(fontSize));
@@ -603,8 +647,8 @@ export class TimelineRenderer {
 
     if (node.event.error) {
       const warn = document.createElementNS(SVG_NS, "text");
-      warn.setAttribute("x",                 String(node.x + w - 2));
-      warn.setAttribute("y",                 String(node.y - halfH + 2));
+      warn.setAttribute("x",                 String(node.x + w / 2 - 2));
+      warn.setAttribute("y",                 String(node.y + 2));
       warn.setAttribute("font-size",         "10");
       warn.setAttribute("dominant-baseline", "auto");
       warn.setAttribute("fill",              COLOR.errorIcon);
@@ -640,9 +684,8 @@ export class TimelineRenderer {
 
   private drawRelations(
     ctx: RenderContext,
-    visLeft: number,
-    visRight: number,
-    _defs: SVGDefsElement
+    visTop: number,
+    visBottom: number
   ): void {
     const { edges, selectedId, settings } = ctx;
     const mode = settings.relationDisplayMode;
@@ -652,8 +695,8 @@ export class TimelineRenderer {
       if (mode === "selected") {
         if (edge.fromId !== selectedId && edge.toId !== selectedId) continue;
       }
-      const fromInView = edge.fromNode.x >= visLeft && edge.fromNode.x <= visRight;
-      const toInView   = edge.toNode.x   >= visLeft && edge.toNode.x   <= visRight;
+      const fromInView = edge.fromNode.y >= visTop && edge.fromNode.y <= visBottom;
+      const toInView   = edge.toNode.y   >= visTop && edge.toNode.y   <= visBottom;
       if (!fromInView && !toInView) continue;
       this.drawBezierEdge(edge, settings);
     }
@@ -662,16 +705,18 @@ export class TimelineRenderer {
   private drawBezierEdge(edge: RelationEdge, settings: NovelsTimelineSettings): void {
     const { fromNode, toNode } = edge;
     const strength = settings.relationCurveStrength;
-    // ノードの視覚上の中心（左端=時間軸起点なので、見た目の中心に接続する）
-    const fromX = this.nodeCenterX(fromNode);
-    const toX   = this.nodeCenterX(toNode);
-    // 時間軸が横軸のため、曲線のふくらみはX方向の距離を基準にY方向へ持たせる
-    const dx       = toX - fromX;
-    const cpOffset = (strength / 100) * Math.max(40, Math.abs(dx) * 0.4);
+    // ノードの視覚上の中心（上端=時間軸起点なので、見た目の中心に接続する）
+    const fromX = fromNode.x;
+    const toX   = toNode.x;
+    const fromY = this.nodeCenterY(fromNode);
+    const toY   = this.nodeCenterY(toNode);
+    // 時間軸が縦軸のため、曲線のふくらみはY方向の距離を基準にX方向へ持たせる
+    const dy       = toY - fromY;
+    const cpOffset = (strength / 100) * Math.max(40, Math.abs(dy) * 0.4);
 
     const d =
-      `M ${fromX} ${fromNode.y} C ${fromX + dx * 0.3} ${fromNode.y + cpOffset}, ` +
-      `${toX - dx * 0.3} ${toNode.y - cpOffset}, ${toX} ${toNode.y}`;
+      `M ${fromX} ${fromY} C ${fromX + cpOffset} ${fromY + dy * 0.3}, ` +
+      `${toX - cpOffset} ${toY - dy * 0.3}, ${toX} ${toY}`;
 
     const path = document.createElementNS(SVG_NS, "path");
     path.setAttribute("d",            d);
@@ -740,34 +785,34 @@ export class TimelineRenderer {
   // ----------------------------------------------------------
 
   private drawGaps(
-    ctx: InternalRenderContext, visLeft: number, visRight: number,
-    axisY: number, gapRowH: number
+    ctx: RenderContext, visTop: number, visBottom: number,
+    axisX: number, gapColW: number
   ): void {
     for (const gap of ctx.gaps) {
-      if (gap.y < visLeft || gap.y > visRight) continue;
+      if (gap.y < visTop || gap.y > visBottom) continue;
 
-      // 表示スロット幅を算出する（Layoutでの配置幅と一致させ、
-      // GAP同士が重ならないようにカード幅をこの範囲に収める）
-      const gapDays   = Math.max(0, gap.toOrder - gap.fromOrder - 1);
-      const slotWidth = gap.expanded
-        ? Math.max(EXPANDED_MIN_WIDTH, gapDays * EXPANDED_PX_PER_DAY)
-        : GAP_SLOT_WIDTH;
+      // 表示スロット高さを算出する（Layoutでの配置高さと一致させ、
+      // GAP同士が重ならないようにカード高さをこの範囲に収める）
+      const gapDays    = Math.max(0, gap.toOrder - gap.fromOrder - 1);
+      const slotHeight = gap.expanded
+        ? Math.max(EXPANDED_MIN_HEIGHT, gapDays * EXPANDED_PX_PER_DAY)
+        : GAP_SLOT_HEIGHT;
 
-      const el = this.gapRenderer.render(gap, axisY, gapRowH, slotWidth);
+      const el = this.gapRenderer.render(gap, axisX, gapColW, slotHeight);
       el.addEventListener("click", () => ctx.onGapClick(gap));
       this.svg.appendChild(el);
     }
   }
 
   // ----------------------------------------------------------
-  // Drag & Drop（レーン変更のみ・縦方向にドラッグする）
+  // Drag & Drop（レーン変更のみ・横方向にドラッグする）
   // ----------------------------------------------------------
 
   private startDrag(e: MouseEvent, node: LayoutNode, g: SVGGElement): void {
     this.dragState = {
       active:       true,
       eventId:      node.event.id,
-      startY:       e.clientY,
+      startX:       e.clientX,
       circle:       g,
       originalLane: node.event.lane,
     };
@@ -776,22 +821,20 @@ export class TimelineRenderer {
 
   private onDragMove(e: MouseEvent, _ctx: RenderContext): void {
     if (!this.dragState.active || !this.dragState.circle) return;
-    const totalClientDy = e.clientY - this.dragState.startY;
-    const totalSvgDy    = this.clientDyToSvgDy(totalClientDy);
-    const originY  = this.laneToSvgY(this.dragState.originalLane, this._lastLanesStartY);
-    this.dragState.circle.setAttribute("transform", `translate(0, ${totalSvgDy})`);
-    void originY;
+    const totalClientDx = e.clientX - this.dragState.startX;
+    const totalSvgDx    = this.clientDxToSvgDx(totalClientDx);
+    this.dragState.circle.setAttribute("transform", `translate(${totalSvgDx}, 0)`);
   }
 
   private onDragEnd(e: MouseEvent, ctx: RenderContext): void {
     if (!this.dragState.active) return;
 
-    const totalClientDy = e.clientY - this.dragState.startY;
-    const totalSvgDy    = this.clientDyToSvgDy(totalClientDy);
+    const totalClientDx = e.clientX - this.dragState.startX;
+    const totalSvgDx    = this.clientDxToSvgDx(totalClientDx);
 
-    const originY    = this.laneToSvgY(this.dragState.originalLane, this._lastLanesStartY);
-    const droppedY   = originY + totalSvgDy;
-    const targetLane = this.svgYToLane(droppedY, this._lastLanesStartY);
+    const originX    = this.laneToSvgX(this.dragState.originalLane, this._lastLaneCount);
+    const droppedX   = originX + totalSvgDx;
+    const targetLane = this.svgXToLane(droppedX, this._lastLaneCount);
 
     ctx.onLaneDrop(this.dragState.eventId, targetLane);
 
@@ -802,31 +845,33 @@ export class TimelineRenderer {
     this.dragState.active = false;
   }
 
-  /** lane番号(1〜10) → SVG Y座標（LayoutEngine.calcY と同じ式） */
-  private laneToSvgY(lane: number, headerH: number): number {
-    const clamped = Math.max(LANE_MIN, Math.min(LANE_MAX, lane));
-    return headerH + (clamped - LANE_MIN) * ROW_HEIGHT + ROW_HEIGHT / 2;
+  /** lane番号(1〜laneCount) → SVG X座標（LayoutEngine.calcX と同じ式） */
+  private laneToSvgX(lane: number, laneCount: number): number {
+    const laneMax = Math.max(LANE_MIN, laneCount);
+    const clamped = Math.max(LANE_MIN, Math.min(laneMax, lane));
+    return LANES_START_X + (clamped - LANE_MIN) * LANE_COL_W + LANE_COL_W / 2;
   }
 
-  /** SVG Y座標 → 最近傍のlane番号（1〜10） */
-  svgYToLane(y: number, headerH: number): number {
+  /** SVG X座標 → 最近傍のlane番号（1〜laneCount） */
+  svgXToLane(x: number, laneCount: number): number {
+    const laneMax = Math.max(LANE_MIN, laneCount);
     let bestLane = LANE_MIN;
     let bestDist = Infinity;
-    for (let lane = LANE_MIN; lane <= LANE_MAX; lane++) {
-      const ly   = this.laneToSvgY(lane, headerH);
-      const dist = Math.abs(y - ly);
+    for (let lane = LANE_MIN; lane <= laneMax; lane++) {
+      const lx   = this.laneToSvgX(lane, laneCount);
+      const dist = Math.abs(x - lx);
       if (dist < bestDist) { bestDist = dist; bestLane = lane; }
     }
     return bestLane;
   }
 
-  /** クライアントpx差分 → SVGユーザー座標差分（Y方向） */
-  private clientDyToSvgDy(clientDy: number): number {
+  /** クライアントpx差分 → SVGユーザー座標差分（X方向） */
+  private clientDxToSvgDx(clientDx: number): number {
     const ctm = this.svg.getScreenCTM();
-    if (ctm && ctm.d !== 0) return clientDy / ctm.d;
-    const rect    = this.svg.getBoundingClientRect();
-    const totalH  = parseFloat(this.svg.getAttribute("height") ?? "600");
-    return clientDy * (totalH / (rect.height || totalH));
+    if (ctm && ctm.a !== 0) return clientDx / ctm.a;
+    const rect   = this.svg.getBoundingClientRect();
+    const totalW = parseFloat(this.svg.getAttribute("width") ?? "600");
+    return clientDx * (totalW / (rect.width || totalW));
   }
 
   // ----------------------------------------------------------

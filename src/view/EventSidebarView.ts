@@ -142,10 +142,11 @@ export class EventSidebarView extends ItemView {
     });
 
     // レーン（右クリック位置から自動取得、プルダウンで手動修正も可）
-    this.addField(el, "レーン（1〜10）", (w) => {
+    const laneMax = this.plugin.settings.laneCount;
+    this.addField(el, `レーン（1〜${laneMax}）`, (w) => {
       const s = w.createEl("select", { cls: "ntj-sf-input" }); s.id = "ntj-f-lane";
-      const clampedLane = Math.max(1, Math.min(10, Math.round(lane)));
-      for (let n = 1; n <= 10; n++) {
+      const clampedLane = Math.max(1, Math.min(laneMax, Math.round(lane)));
+      for (let n = 1; n <= laneMax; n++) {
         const o = s.createEl("option", { text: String(n) }); o.value = String(n);
         if (n === clampedLane) o.selected = true;
       }
@@ -239,10 +240,11 @@ export class EventSidebarView extends ItemView {
     });
 
     // レーン
-    this.addField(el, "レーン（1〜10）", (w) => {
+    const laneMaxEdit = this.plugin.settings.laneCount;
+    this.addField(el, `レーン（1〜${laneMaxEdit}）`, (w) => {
       const s = w.createEl("select", { cls: "ntj-sf-input" }); s.id = "ntj-e-lane";
-      const clampedLane = Math.max(1, Math.min(10, Math.round(event.lane)));
-      for (let n = 1; n <= 10; n++) {
+      const clampedLane = Math.max(1, Math.min(laneMaxEdit, Math.round(event.lane)));
+      for (let n = 1; n <= laneMaxEdit; n++) {
         const o = s.createEl("option", { text: String(n) }); o.value = String(n);
         if (n === clampedLane) o.selected = true;
       }
@@ -575,9 +577,10 @@ export class EventSidebarView extends ItemView {
     }
 
     // ── レーン ──
+    const laneMax = this.plugin.settings.laneCount;
     const lane = parseInt(laneStr, 10);
-    if (isNaN(lane) || lane < 1 || lane > 10) {
-      errors.push("レーンは 1〜10 の整数を入力してください。");
+    if (isNaN(lane) || lane < 1 || lane > laneMax) {
+      errors.push(`レーンは 1〜${laneMax} の整数を入力してください。`);
     }
 
     // ── カラー（配色セットID、またはレガシーな生HEX値） ──

@@ -6,7 +6,7 @@
 import { App, PluginSettingTab, Setting, Notice, normalizePath } from "obsidian";
 import type NovelsTimelinePlugin from "../main";
 import { CalendarMonth, CalendarSettings } from "../types/TimelineTypes";
-import { DEFAULT_CALENDAR, BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, BOARD_ZOOM_DEFAULT, GAP_THRESHOLD_MIN, GAP_THRESHOLD_MAX, GAP_THRESHOLD_DEFAULT, GAP_THRESHOLD_STEP } from "./PluginSettings";
+import { DEFAULT_CALENDAR, BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, BOARD_ZOOM_DEFAULT, GAP_THRESHOLD_MIN, GAP_THRESHOLD_MAX, GAP_THRESHOLD_DEFAULT, GAP_THRESHOLD_STEP, LANE_COUNT_MIN, LANE_COUNT_MAX, LANE_COUNT_DEFAULT, LANE_COUNT_STEP } from "./PluginSettings";
 import { ColorPresetModal } from "../view/ColorPresetModal";
 
 export class NovelsTimelineSettingTab extends PluginSettingTab {
@@ -202,6 +202,35 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
     // Timeline
     // ========================================================
     new Setting(containerEl).setName("Timeline").setHeading();
+
+    new Setting(containerEl)
+      .setName("Lane count")
+      .setDesc(
+        `時間軸の右側に並べるレーン列の数（${LANE_COUNT_MIN}〜${LANE_COUNT_MAX}）。` +
+        "既存イベントのレーン番号がこの値を超える場合は、表示上は最大レーンに丸めて描画されます（ノート側の値は変更されません）。"
+      )
+      .addSlider((slider) =>
+        slider
+          .setLimits(LANE_COUNT_MIN, LANE_COUNT_MAX, LANE_COUNT_STEP)
+          .setValue(this.plugin.settings.laneCount)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.laneCount = value;
+            await this.plugin.saveSettings();
+            this.plugin.notifySettingsChanged();
+          })
+      )
+      .addExtraButton((btn) =>
+        btn
+          .setIcon("reset")
+          .setTooltip(`${LANE_COUNT_DEFAULT}に戻す`)
+          .onClick(async () => {
+            this.plugin.settings.laneCount = LANE_COUNT_DEFAULT;
+            await this.plugin.saveSettings();
+            this.plugin.notifySettingsChanged();
+            this.display();
+          })
+      );
 
     new Setting(containerEl)
       .setName("Gap compression")

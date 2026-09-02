@@ -54,6 +54,8 @@ export interface NovelsTimelineSettings {
   gapCompression: boolean;
   /** Gap生成条件（日数） */
   gapThreshold: number;
+  /** レーン数（時間軸右側に並ぶレーン列の数。既定値10） */
+  laneCount: number;
 
   // --- Calendar（C. 暦設定） ---
   /** 暦設定 */
@@ -108,6 +110,15 @@ export const GAP_THRESHOLD_DEFAULT = 30;
 export const GAP_THRESHOLD_STEP    = 1;
 
 // ------------------------------------------------------------
+// Lane Count（時間軸右側に並ぶレーン列の数）
+// ------------------------------------------------------------
+
+export const LANE_COUNT_MIN     = 1;
+export const LANE_COUNT_MAX     = 20;
+export const LANE_COUNT_DEFAULT = 10;
+export const LANE_COUNT_STEP    = 1;
+
+// ------------------------------------------------------------
 // デフォルト設定値
 // ------------------------------------------------------------
 
@@ -119,6 +130,7 @@ export const DEFAULT_SETTINGS: NovelsTimelineSettings = {
 
   gapCompression: true,
   gapThreshold: GAP_THRESHOLD_DEFAULT,
+  laneCount: LANE_COUNT_DEFAULT,
 
   calendar: DEFAULT_CALENDAR,
 

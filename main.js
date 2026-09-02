@@ -54,12 +54,17 @@ var GAP_THRESHOLD_MIN = 3;
 var GAP_THRESHOLD_MAX = 30;
 var GAP_THRESHOLD_DEFAULT = 30;
 var GAP_THRESHOLD_STEP = 1;
+var LANE_COUNT_MIN = 1;
+var LANE_COUNT_MAX = 20;
+var LANE_COUNT_DEFAULT = 10;
+var LANE_COUNT_STEP = 1;
 var DEFAULT_SETTINGS = {
   newEventFolder: "",
   excludedFolders: [],
   boardZoom: 100,
   gapCompression: true,
   gapThreshold: GAP_THRESHOLD_DEFAULT,
+  laneCount: LANE_COUNT_DEFAULT,
   calendar: DEFAULT_CALENDAR,
   relationColor: "#808080",
   relationStyle: "solid",
@@ -473,7 +478,9 @@ var TimelineParser = class {
       displayTitle: this.parseTitleField(frontmatter[NTJP_KEYS.eventTitle], legacyDisplayTitle),
       date,
       timelineOrder,
-      lane: this.parseIntField(frontmatter[NTJP_KEYS.lane], 1, 1, 10),
+      // レーン数（laneCount）は設定で可変のため、ここでは異常値のみ弾く安全上限とする。
+      // 実効的な上限クランプは描画時（LayoutEngine.findFreeLane）が設定値で行う。
+      lane: this.parseIntField(frontmatter[NTJP_KEYS.lane], 1, 1, 9999),
       size: this.parseSizeField(frontmatter[NTJP_KEYS.node]),
       color: this.parseColorField(frontmatter[NTJP_KEYS.colors]),
       characters: this.parseStringArray(frontmatter[NTJP_KEYS.characters]),
@@ -628,27 +635,27 @@ var DiscoveryEngine = class _DiscoveryEngine {
 
 // src/engine/LayoutEngine.ts
 var LANE_MIN = 1;
-var LANE_MAX = 10;
-var LANE_COUNT = LANE_MAX - LANE_MIN + 1;
-var ROW_HEIGHT = 50;
-var HEADER_HEIGHT = 64;
-var GAP_ROW_HEIGHT = 40;
-var LANES_START_Y = HEADER_HEIGHT + GAP_ROW_HEIGHT;
-var LANE_LABEL_W = 56;
+var LANE_COL_W = 60;
+var HEADER_H = 36;
+var YEAR_COL_W = 64;
+var MONTH_COL_W = 64;
+var GAP_COL_W = 80;
+var LANES_START_X = YEAR_COL_W + MONTH_COL_W + GAP_COL_W;
+var AXIS_X = YEAR_COL_W + MONTH_COL_W;
 var SIZE_MULTIPLIER = {
   small: 1,
   medium: 1.5,
   big: 2
 };
 var BASE_UNIT_HALF_HEIGHT = 8;
-var START_X = LANE_LABEL_W + 20;
-var MIN_X_GAP = 46;
-var X_SCALE = 4;
-var NODE_EDGE_PADDING = 50;
+var START_Y = HEADER_H + 20;
+var MIN_Y_GAP = 46;
+var Y_SCALE = 4;
+var NODE_EDGE_PADDING = 30;
 var GAP_MIN_DAYS = 3;
-var GAP_SLOT_WIDTH = Math.max(MIN_X_GAP, GAP_MIN_DAYS * X_SCALE) * 1.5;
+var GAP_SLOT_HEIGHT = Math.max(MIN_Y_GAP, GAP_MIN_DAYS * Y_SCALE) * 1.5;
 var EXPANDED_PX_PER_DAY = 20;
-var EXPANDED_MIN_WIDTH = 120;
+var EXPANDED_MIN_HEIGHT = 120;
 var LEAD_DAYS_BEFORE_FIRST = 3;
 function dayLabelForEvent(event) {
   const match = /\/([0-9]+)$/.exec(event.date);
@@ -673,15 +680,15 @@ var LayoutEngine = class {
   // ----------------------------------------------------------
   // メイン：イベント一覧 → LayoutNode 一覧
   // ----------------------------------------------------------
-  buildLayout(sortedEvents, lanesStartY, gaps, gapCompression) {
+  buildLayout(sortedEvents, laneCount, gaps, gapCompression) {
     var _a;
     if (sortedEvents.length === 0) return [];
     const dayGroups = this.groupByDay(sortedEvents);
-    const xByOrder = this.calcXByDayGroup(dayGroups, gaps, gapCompression);
+    const yByOrder = this.calcYByDayGroup(dayGroups, gaps, gapCompression);
     const nodes = [];
     for (const group of dayGroups) {
-      const x = (_a = xByOrder.get(group.order)) != null ? _a : 0;
-      this.resolveGroupLayout(group.events, x, lanesStartY, nodes);
+      const y = (_a = yByOrder.get(group.order)) != null ? _a : 0;
+      this.resolveGroupLayout(group.events, y, laneCount, nodes);
     }
     return nodes;
   }
@@ -701,110 +708,116 @@ var LayoutEngine = class {
     return groups;
   }
   // ----------------------------------------------------------
-  // ② 日付グループ単位でX座標を計算（1日 = 1列）
+  // ② 日付グループ単位でY座標を計算（1日 = 1行）
   // ----------------------------------------------------------
-  calcXByDayGroup(groups, gaps, gapCompression) {
-    const xMap = /* @__PURE__ */ new Map();
-    if (groups.length === 0) return xMap;
-    let currentX = START_X;
-    currentX += Math.max(MIN_X_GAP, LEAD_DAYS_BEFORE_FIRST * X_SCALE);
-    xMap.set(groups[0].order, currentX);
-    let prevGroupMaxWidth = this.groupMaxPillWidth(groups[0].events);
+  calcYByDayGroup(groups, gaps, gapCompression) {
+    const yMap = /* @__PURE__ */ new Map();
+    if (groups.length === 0) return yMap;
+    let currentY = START_Y;
+    currentY += Math.max(MIN_Y_GAP, LEAD_DAYS_BEFORE_FIRST * Y_SCALE);
+    yMap.set(groups[0].order, currentY);
+    let prevGroupMaxHeight = this.groupMaxNodeHeight(groups[0].events);
     for (let i = 1; i < groups.length; i++) {
       const prev = groups[i - 1];
       const cur = groups[i];
       const orderDiff = cur.order - prev.order;
-      const minWidthAwareGap = prevGroupMaxWidth + NODE_EDGE_PADDING;
+      const minHeightAwareGap = prevGroupMaxHeight + NODE_EDGE_PADDING;
       if (gapCompression) {
         const matchingGap = gaps.find(
           (g) => g.fromOrder === prev.order && g.toOrder === cur.order
         );
         if (matchingGap) {
-          const gapWidth = matchingGap.expanded ? Math.max(EXPANDED_MIN_WIDTH, orderDiff * EXPANDED_PX_PER_DAY) : GAP_SLOT_WIDTH;
-          currentX += Math.max(gapWidth, minWidthAwareGap);
+          const gapHeight = matchingGap.expanded ? Math.max(EXPANDED_MIN_HEIGHT, orderDiff * EXPANDED_PX_PER_DAY) : GAP_SLOT_HEIGHT;
+          currentY += Math.max(gapHeight, minHeightAwareGap);
         } else {
-          currentX += Math.max(MIN_X_GAP, orderDiff * X_SCALE, minWidthAwareGap);
+          currentY += Math.max(MIN_Y_GAP, orderDiff * Y_SCALE, minHeightAwareGap);
         }
       } else {
-        currentX += Math.max(MIN_X_GAP, orderDiff * X_SCALE, minWidthAwareGap);
+        currentY += Math.max(MIN_Y_GAP, orderDiff * Y_SCALE, minHeightAwareGap);
       }
-      xMap.set(cur.order, currentX);
-      prevGroupMaxWidth = this.groupMaxPillWidth(cur.events);
+      yMap.set(cur.order, currentY);
+      prevGroupMaxHeight = this.groupMaxNodeHeight(cur.events);
     }
-    return xMap;
+    return yMap;
   }
-  /** グループ内イベントのうち、最も描画幅が広いノードの幅(px)を返す */
-  groupMaxPillWidth(events) {
-    let maxWidth = 0;
+  /** グループ内イベントのうち、最も時間軸方向の占有幅(radius*2)が大きいノードの値(px)を返す */
+  groupMaxNodeHeight(events) {
+    let maxHeight = 0;
     for (const event of events) {
-      const radius = this.calcRadius(event.size);
-      const width = estimateNodePillWidth(event, radius);
-      if (width > maxWidth) maxWidth = width;
+      const height = this.calcRadius(event.size) * 2;
+      if (height > maxHeight) maxHeight = height;
     }
-    return maxWidth;
+    return maxHeight;
   }
   // ----------------------------------------------------------
   // ③ グループ内レイアウト
-  //    - 同laneの衝突はlaneをずらして回避（1〜10の範囲内）
+  //    - 同laneの衝突はlaneをずらして回避（1〜laneCountの範囲内）
   // ----------------------------------------------------------
-  resolveGroupLayout(events, x, lanesStartY, out) {
+  resolveGroupLayout(events, y, laneCount, out) {
     const usedLanes = /* @__PURE__ */ new Set();
     const resolved = [];
     for (const event of events) {
-      const lane = this.findFreeLane(event.lane, usedLanes);
+      const lane = this.findFreeLane(event.lane, usedLanes, laneCount);
       usedLanes.add(lane);
       resolved.push({ event, effectiveLane: lane });
     }
     for (const { event, effectiveLane } of resolved) {
-      const y = this.calcY(effectiveLane, lanesStartY);
+      const x = this.calcX(effectiveLane, laneCount);
       const radius = this.calcRadius(event.size);
       out.push({ event, x, y, radius });
     }
   }
   /**
-   * 指定laneから最も近い未使用laneを探す（1〜10の範囲のみ）。
+   * 指定laneから最も近い未使用laneを探す（1〜laneCountの範囲のみ）。
    * 範囲外に押し出された場合は、範囲内で最初に見つかった空きlaneを使う。
    * 全レーンが埋まっている場合は指定laneをそのまま返す（重なりを許容）。
    */
-  findFreeLane(startLane, usedLanes) {
-    const clampedStart = Math.max(LANE_MIN, Math.min(LANE_MAX, startLane));
+  findFreeLane(startLane, usedLanes, laneCount) {
+    const laneMax = Math.max(LANE_MIN, laneCount);
+    const clampedStart = Math.max(LANE_MIN, Math.min(laneMax, startLane));
     if (!usedLanes.has(clampedStart)) return clampedStart;
-    for (let delta = 1; delta < LANE_COUNT; delta++) {
+    for (let delta = 1; delta < laneMax; delta++) {
       for (const candidate of [clampedStart + delta, clampedStart - delta]) {
-        if (candidate < LANE_MIN || candidate > LANE_MAX) continue;
+        if (candidate < LANE_MIN || candidate > laneMax) continue;
         if (!usedLanes.has(candidate)) return candidate;
       }
     }
     return clampedStart;
   }
   // ----------------------------------------------------------
-  // X座標マップ（GapEngine・orderFromViewportX 用の公開API）
+  // Y座標マップ（GapEngine・orderFromViewportY 用の公開API）
   // ----------------------------------------------------------
   /**
-   * GapEngineに渡すための「イベントID → X座標」マップを返す。
+   * GapEngineに渡すための「イベントID → Y座標」マップを返す。
    * buildLayout より前に呼ばれるため、Gap情報なしで算出する暫定版。
    */
-  calcXPositions(sortedEvents, gaps, gapCompression) {
+  calcYPositions(sortedEvents, gaps, gapCompression) {
     var _a;
     const groups = this.groupByDay(sortedEvents);
-    const xByOrder = this.calcXByDayGroup(groups, gaps, gapCompression);
-    const xMap = /* @__PURE__ */ new Map();
+    const yByOrder = this.calcYByDayGroup(groups, gaps, gapCompression);
+    const yMap = /* @__PURE__ */ new Map();
     for (const group of groups) {
-      const x = (_a = xByOrder.get(group.order)) != null ? _a : 0;
+      const y = (_a = yByOrder.get(group.order)) != null ? _a : 0;
       for (const event of group.events) {
-        xMap.set(event.id, x);
+        yMap.set(event.id, y);
       }
     }
-    return xMap;
+    return yMap;
   }
-  calcTotalWidth(nodes) {
-    if (nodes.length === 0) return 800;
-    return Math.max(...nodes.map((n) => n.x)) + 140;
+  /** SVG全体の幅(px)。レーン数（設定値）にのみ依存し、イベント数では変化しない固定値。 */
+  calcTotalWidth(laneCount) {
+    return LANES_START_X + Math.max(LANE_MIN, laneCount) * LANE_COL_W + 24;
   }
-  /** レーン番号(1〜10) → SVG Y座標（行の中心） */
-  calcY(lane, lanesStartY) {
-    const clamped = Math.max(LANE_MIN, Math.min(LANE_MAX, lane));
-    return lanesStartY + (clamped - LANE_MIN) * ROW_HEIGHT + ROW_HEIGHT / 2;
+  /** SVG全体の高さ(px)。イベントの時間軸方向の配置に応じて動的に変化する。 */
+  calcTotalHeight(nodes) {
+    if (nodes.length === 0) return 600;
+    return Math.max(...nodes.map((n) => n.y)) + 140;
+  }
+  /** レーン番号(1〜laneCount) → SVG X座標（列の中心） */
+  calcX(lane, laneCount) {
+    const laneMax = Math.max(LANE_MIN, laneCount);
+    const clamped = Math.max(LANE_MIN, Math.min(laneMax, lane));
+    return LANES_START_X + (clamped - LANE_MIN) * LANE_COL_W + LANE_COL_W / 2;
   }
   calcRadius(size) {
     var _a;
@@ -812,53 +825,53 @@ var LayoutEngine = class {
     return BASE_UNIT_HALF_HEIGHT * multiplier;
   }
   /**
-   * クリック位置(ビューポートX)から日付文字列を逆算する。
+   * クリック位置(ビューポートY)から日付文字列を逆算する。
    *
    * 【設計方針】
-   * - nodes[i].x は calcXByDayGroup が生成した SVGユーザー座標（実際の描画X）。
-   * - クリック位置 svgX は TimelineRenderer.clientXToSvgX() で変換済みの
+   * - nodes[i].y は calcYByDayGroup が生成した SVGユーザー座標（実際の描画Y、ノード上端）。
+   * - クリック位置 svgY は TimelineRenderer.clientYToSvgY() で変換済みの
    *   SVGユーザー座標（ボードズームを考慮済み）を渡すこと。
-   * - Gap展開/折りたたみ状態に関係なく、nodes の x 値は常に正しい描画位置を示す。
+   * - Gap展開/折りたたみ状態に関係なく、nodes の y 値は常に正しい描画位置を示す。
    * - 区間ごとの px/日 定数で orderDiff を復元し、最初のイベントの order を基点に加算する。
    */
-  orderFromViewportX(svgX, nodes, gaps, gapCompression, calendarPrefix = "") {
+  orderFromViewportY(svgY, nodes, gaps, gapCompression, calendarPrefix = "") {
     if (nodes.length === 0) {
       return this.orderToDateString(0, calendarPrefix);
     }
     const seen = /* @__PURE__ */ new Map();
     for (const node of nodes) {
       if (!seen.has(node.event.timelineOrder)) {
-        seen.set(node.event.timelineOrder, node.x);
+        seen.set(node.event.timelineOrder, node.y);
       }
     }
-    const entries = Array.from(seen.entries()).map(([order, x]) => ({ order, vx: x })).sort((a, b) => a.vx - b.vx);
+    const entries = Array.from(seen.entries()).map(([order, y]) => ({ order, vy: y })).sort((a, b) => a.vy - b.vy);
     const first = entries[0];
     const last = entries[entries.length - 1];
-    if (svgX <= first.vx) {
+    if (svgY <= first.vy) {
       return this.orderToDateString(Math.max(0, first.order - 1), calendarPrefix);
     }
-    if (svgX >= last.vx) {
+    if (svgY >= last.vy) {
       return this.orderToDateString(last.order + 1, calendarPrefix);
     }
     for (let i = 0; i < entries.length - 1; i++) {
       const cur = entries[i];
       const next = entries[i + 1];
-      if (svgX < cur.vx || svgX > next.vx) continue;
-      const segW = next.vx - cur.vx;
-      if (segW <= 0) {
+      if (svgY < cur.vy || svgY > next.vy) continue;
+      const segH = next.vy - cur.vy;
+      if (segH <= 0) {
         return this.orderToDateString(cur.order, calendarPrefix);
       }
-      const dx = svgX - cur.vx;
+      const dy = svgY - cur.vy;
       const orderDiff = next.order - cur.order;
-      const t = dx / segW;
+      const t = dy / segH;
       const rawOrder = Math.round(cur.order + t * orderDiff);
       const estimatedOrder = Math.max(cur.order, Math.min(next.order, rawOrder));
       return this.orderToDateString(estimatedOrder, calendarPrefix);
     }
     let nearest = entries[0];
-    let minDist = Math.abs(svgX - entries[0].vx);
+    let minDist = Math.abs(svgY - entries[0].vy);
     for (const e of entries) {
-      const d = Math.abs(svgX - e.vx);
+      const d = Math.abs(svgY - e.vy);
       if (d < minDist) {
         minDist = d;
         nearest = e;
@@ -939,7 +952,7 @@ var GapEngine = class {
    * ソート済みイベント一覧と各イベントのY座標から Gap を生成する
    *
    * @param sortedEvents  timelineOrder 昇順でソート済みのイベント
-   * @param yPositions    イベントID → SVG X座標（時間軸位置）のマップ
+   * @param yPositions    イベントID → SVG Y座標（時間軸位置）のマップ
    * @param threshold     Gap生成条件（日数相当値）
    */
   buildGaps(sortedEvents, yPositions, threshold) {
@@ -959,16 +972,16 @@ var GapEngine = class {
     return gaps;
   }
   // ----------------------------------------------------------
-  // Gap の位置（時間軸X座標）をノードの実描画位置で更新する
+  // Gap の位置（時間軸Y座標）をノードの実描画位置で更新する
   // ----------------------------------------------------------
   /**
    * buildGaps() 後、LayoutEngine.buildLayout() で確定した LayoutNode 一覧を使って
-   * 各 Gap の表示位置（実体はX座標）を更新する。
+   * 各 Gap の表示位置（Y座標）を更新する。
    *
-   * ノードは「左端(node.x)が時間軸の日付起点」となるよう描画されるため、
-   * Gapの中心は
-   *   前イベントノードの【右端】(x + 描画幅) 〜 後イベントノードの【左端】(x)
-   * の中間点として算出する。単純に両ノードの x（左端同士）の中間点を取ると、
+   * ノードは「上端(node.y)が時間軸の日付起点、radius分だけ上下に占有」となるよう
+   * 描画されるため、Gapの中心は
+   *   前イベントノードの【下端】(y + radius) 〜 後イベントノードの【上端】(y - radius)
+   * の中間点として算出する。単純に両ノードの y（上端同士）の中間点を取ると、
    * 前イベントノードの描画範囲にGapが重なって見えてしまうため注意する。
    */
   updateGapYPositions(gaps, nodes) {
@@ -982,9 +995,9 @@ var GapEngine = class {
       const fromNode = orderToNode.get(gap.fromOrder);
       const toNode = orderToNode.get(gap.toOrder);
       if (!fromNode || !toNode) continue;
-      const fromRightEdge = fromNode.x + estimateNodePillWidth(fromNode.event, fromNode.radius);
-      const toLeftEdge = toNode.x;
-      gap.y = (fromRightEdge + toLeftEdge) / 2;
+      const fromBottomEdge = fromNode.y + fromNode.radius;
+      const toTopEdge = toNode.y - toNode.radius;
+      gap.y = (fromBottomEdge + toTopEdge) / 2;
     }
   }
   // ----------------------------------------------------------
@@ -2730,68 +2743,64 @@ var Tooltip = class {
 var SVG_NS = "http://www.w3.org/2000/svg";
 var GapRenderer = class {
   /**
-   * @param gap      Gapセグメント（gap.y は時間軸上のSVG X座標）
-   * @param axisY    時間軸（水平線）のSVG Y座標
-   * @param gapRowH  GAP専用レーンの高さ（axisYから下に確保された帯の高さ）
+   * @param gap        Gapセグメント（gap.y は時間軸上のSVG Y座標）
+   * @param axisX      時間軸（垂直線）のSVG X座標
+   * @param gapColW    GAP専用列の幅（axisXから右に確保された帯の幅）
+   * @param slotHeight このGapに割り当てられた縦幅（Layout側の配置高さと一致させる）。
+   *                   カードの縦幅はこの範囲を超えないようにする（GAP同士の重なり防止）。
+   *                   カードの横幅は常にGAP列の幅に収まるようクランプし、
+   *                   文字が収まらない場合はフォントサイズを縮小して対応する。
    */
-  /**
-   * @param gap        Gapセグメント（gap.y は時間軸上のSVG X座標）
-   * @param axisY      時間軸（水平線）のSVG Y座標
-   * @param gapRowH    GAP専用レーンの高さ（axisYから下に確保された帯の高さ）
-   * @param slotWidth  このGapに割り当てられた横幅（Layout側の配置幅と一致させる）。
-   *                   カードはこの幅を超えないようにし、文字が収まらない場合は
-   *                   フォントサイズを縮小して対応する（GAP同士の重なり防止）。
-   */
-  render(gap, axisY, gapRowH, slotWidth) {
+  render(gap, axisX, gapColW, slotHeight) {
     const g = document.createElementNS(SVG_NS, "g");
     g.setAttribute("class", "ntj-gap");
-    const x = gap.y;
-    const cardY = axisY + gapRowH / 2 + 4;
+    const y = gap.y;
+    const cardX = axisX + gapColW / 2 + 4;
     const labelText = gap.expanded ? `\u25B2 ${gap.label}` : `\u25BC ${gap.label}`;
     const PADDING = 10;
     const minFont = 7;
     const maxFont = 11;
-    const labelW = Math.max(28, slotWidth - 4);
+    const labelW = Math.max(28, gapColW - 8);
     const charWidthRatio = 0.62;
     let fontSize = Math.min(maxFont, (labelW - PADDING) / Math.max(1, labelText.length) / charWidthRatio);
     fontSize = Math.max(minFont, fontSize);
-    const labelH = Math.min(22, gapRowH - 8);
+    const labelH = Math.min(22, Math.max(14, slotHeight - 4));
     const nodeR = 5;
     const dx = nodeR;
     const dy = nodeR;
     const diamond = document.createElementNS(SVG_NS, "polygon");
     const pts = [
-      `${x},${axisY - dy}`,
-      `${x + dx},${axisY}`,
-      `${x},${axisY + dy}`,
-      `${x - dx},${axisY}`
+      `${axisX},${y - dy}`,
+      `${axisX + dx},${y}`,
+      `${axisX},${y + dy}`,
+      `${axisX - dx},${y}`
     ].join(" ");
     diamond.setAttribute("points", pts);
     diamond.setAttribute("fill", "var(--background-secondary)");
     diamond.setAttribute("stroke", "var(--text-muted)");
     diamond.setAttribute("stroke-width", "1.5");
     g.appendChild(diamond);
-    const lineY1 = axisY + dy;
-    const lineY2 = cardY - labelH / 2;
+    const lineX1 = axisX + dx;
+    const lineX2 = cardX - labelW / 2;
     const connector = document.createElementNS(SVG_NS, "line");
-    connector.setAttribute("x1", String(x));
-    connector.setAttribute("y1", String(lineY1));
-    connector.setAttribute("x2", String(x));
-    connector.setAttribute("y2", String(lineY2));
+    connector.setAttribute("x1", String(lineX1));
+    connector.setAttribute("y1", String(y));
+    connector.setAttribute("x2", String(lineX2));
+    connector.setAttribute("y2", String(y));
     connector.setAttribute("stroke", "var(--text-muted)");
     connector.setAttribute("stroke-width", "1");
     g.appendChild(connector);
     const shadow = document.createElementNS(SVG_NS, "rect");
-    shadow.setAttribute("x", String(x - labelW / 2 + 2));
-    shadow.setAttribute("y", String(cardY - labelH / 2 + 2));
+    shadow.setAttribute("x", String(cardX - labelW / 2 + 2));
+    shadow.setAttribute("y", String(y - labelH / 2 + 2));
     shadow.setAttribute("width", String(labelW));
     shadow.setAttribute("height", String(labelH));
     shadow.setAttribute("rx", "6");
     shadow.setAttribute("fill", "rgba(0,0,0,0.18)");
     g.appendChild(shadow);
     const card = document.createElementNS(SVG_NS, "rect");
-    card.setAttribute("x", String(x - labelW / 2));
-    card.setAttribute("y", String(cardY - labelH / 2));
+    card.setAttribute("x", String(cardX - labelW / 2));
+    card.setAttribute("y", String(y - labelH / 2));
     card.setAttribute("width", String(labelW));
     card.setAttribute("height", String(labelH));
     card.setAttribute("rx", "6");
@@ -2800,8 +2809,8 @@ var GapRenderer = class {
     card.setAttribute("stroke-width", "0.8");
     g.appendChild(card);
     const highlight = document.createElementNS(SVG_NS, "rect");
-    highlight.setAttribute("x", String(x - labelW / 2 + 2));
-    highlight.setAttribute("y", String(cardY - labelH / 2 + 1));
+    highlight.setAttribute("x", String(cardX - labelW / 2 + 2));
+    highlight.setAttribute("y", String(y - labelH / 2 + 1));
     highlight.setAttribute("width", String(labelW - 4));
     highlight.setAttribute("height", "1");
     highlight.setAttribute("rx", "1");
@@ -2809,8 +2818,8 @@ var GapRenderer = class {
     highlight.setAttribute("fill-opacity", "0.5");
     g.appendChild(highlight);
     const text = document.createElementNS(SVG_NS, "text");
-    text.setAttribute("x", String(x));
-    text.setAttribute("y", String(cardY));
+    text.setAttribute("x", String(cardX));
+    text.setAttribute("y", String(y));
     text.setAttribute("text-anchor", "middle");
     text.setAttribute("dominant-baseline", "central");
     text.setAttribute("font-size", String(fontSize.toFixed(1)));
@@ -2833,9 +2842,9 @@ var COLOR = {
 };
 var TimelineRenderer = class {
   constructor(container) {
-    this._lastLanesStartY = LANES_START_Y;
+    this._lastLaneCount = 10;
     // render() で更新、drag時に参照
-    this.dragState = { active: false, eventId: "", startY: 0, circle: null, originalLane: 1 };
+    this.dragState = { active: false, eventId: "", startX: 0, circle: null, originalLane: 1 };
     this.container = container;
     this.svg = document.createElementNS(SVG_NS2, "svg");
     this.svg.setAttribute("xmlns", SVG_NS2);
@@ -2847,109 +2856,111 @@ var TimelineRenderer = class {
   // メイン描画
   // ----------------------------------------------------------
   render(ctx) {
-    const { settings, totalWidth, virtualWindow } = ctx;
-    const headerH = HEADER_HEIGHT;
-    const gapRowH = GAP_ROW_HEIGHT;
-    const lanesStartY = LANES_START_Y;
-    const rowH = ROW_HEIGHT;
-    const lanes = LANE_COUNT;
-    const axisY = headerH;
-    const svgHeight = lanesStartY + lanes * rowH + 24;
-    this._lastLanesStartY = lanesStartY;
-    this.svg.setAttribute("viewBox", `0 0 ${totalWidth} ${svgHeight}`);
+    var _a;
+    const { settings, totalWidth, totalHeight, virtualWindow } = ctx;
+    const laneCount = Math.max(LANE_MIN, settings.laneCount);
+    const headerH = HEADER_H;
+    const gapColW = GAP_COL_W;
+    const lanesStartX = LANES_START_X;
+    const colW = LANE_COL_W;
+    const axisX = AXIS_X;
+    this._lastLaneCount = laneCount;
+    this.svg.setAttribute("viewBox", `0 0 ${totalWidth} ${totalHeight}`);
     this.svg.setAttribute("width", String(totalWidth));
-    this.svg.setAttribute("height", String(svgHeight));
+    this.svg.setAttribute("height", String(totalHeight));
     this.svg.style.minWidth = `${totalWidth}px`;
+    this.svg.style.minHeight = `${totalHeight}px`;
     while (this.svg.firstChild) this.svg.removeChild(this.svg.firstChild);
     const buffer = settings.virtualRendering ? virtualWindow.buffer : Infinity;
+    const visTop = virtualWindow.scrollTop - buffer;
+    const visBottom = virtualWindow.scrollTop + virtualWindow.viewportHeight + buffer;
     const visLeft = virtualWindow.scrollLeft - buffer;
     const visRight = virtualWindow.scrollLeft + virtualWindow.viewportWidth + buffer;
     const defs = document.createElementNS(SVG_NS2, "defs");
     this.svg.appendChild(defs);
-    const ctxWithAxis = { ...ctx, axisY };
-    this.drawLaneRows(totalWidth, lanesStartY, rowH, lanes);
-    this.drawGapRowBackground(totalWidth, axisY, gapRowH);
-    this.drawTimeAxis(axisY, totalWidth);
+    this.drawLaneColumns(totalHeight, lanesStartX, colW, laneCount);
+    this.drawGapColumnBackground(totalHeight, axisX, gapColW);
+    this.drawTimeAxis(axisX, totalHeight);
     if (settings.gapCompression) {
-      this.drawGaps(ctxWithAxis, visLeft, visRight, axisY, gapRowH);
+      this.drawGaps(ctx, visTop, visBottom, axisX, gapColW);
     }
-    this.drawRelations(ctxWithAxis, visLeft, visRight, defs);
-    this.drawNodes(ctxWithAxis, visLeft, visRight);
-    this.drawDateRuler(ctxWithAxis, visLeft, visRight);
-    this.drawLaneLabelColumn(axisY, gapRowH, rowH, lanes, virtualWindow.scrollLeft);
-    this.drawCornerBox(virtualWindow.scrollLeft, virtualWindow.scrollTop, headerH);
+    this.drawRelations(ctx, visTop, visBottom);
+    this.drawNodes(ctx, visTop, visBottom, visLeft, visRight);
+    this.drawDateColumn(ctx, visTop, visBottom, virtualWindow.scrollLeft);
+    this.drawLaneHeaderRow(lanesStartX, colW, laneCount, headerH, virtualWindow.scrollTop);
+    this.drawCornerHeader(virtualWindow.scrollLeft, virtualWindow.scrollTop, headerH, (_a = settings.calendar.name) != null ? _a : "");
     this.svg.oncontextmenu = (e) => {
       e.preventDefault();
-      const svgY = this.clientYToSvgY(e.clientY);
-      const lane = this.svgYToLane(svgY, this._lastLanesStartY);
-      ctx.onContextMenu(this.clientXToSvgX(e.clientX), e.clientX, e.clientY, lane);
+      const svgX = this.clientXToSvgX(e.clientX);
+      const lane = this.svgXToLane(svgX, laneCount);
+      ctx.onContextMenu(this.clientYToSvgY(e.clientY), e.clientX, e.clientY, lane);
     };
     this.svg.onmousemove = (e) => {
       this.tooltip.move(e.clientX, e.clientY);
-      this.onDragMove(e, ctxWithAxis);
+      this.onDragMove(e, ctx);
     };
-    this.svg.onmouseup = (e) => this.onDragEnd(e, ctxWithAxis);
+    this.svg.onmouseup = (e) => this.onDragEnd(e, ctx);
   }
   // ----------------------------------------------------------
-  // GAP専用レーンの背景（時間軸とイベントレーンの間の帯）
+  // GAP専用列の背景（時間軸とレーン列の間の帯）
   // ----------------------------------------------------------
-  drawGapRowBackground(totalWidth, axisY, gapRowH) {
+  drawGapColumnBackground(totalHeight, axisX, gapColW) {
     const bg = document.createElementNS(SVG_NS2, "rect");
-    bg.setAttribute("x", "0");
-    bg.setAttribute("y", String(axisY));
-    bg.setAttribute("width", String(totalWidth));
-    bg.setAttribute("height", String(gapRowH));
+    bg.setAttribute("x", String(axisX));
+    bg.setAttribute("y", "0");
+    bg.setAttribute("width", String(gapColW));
+    bg.setAttribute("height", String(totalHeight));
     bg.setAttribute("fill", "var(--background-secondary-alt)");
     bg.setAttribute("fill-opacity", "0.4");
     this.svg.appendChild(bg);
-    const bottomLine = document.createElementNS(SVG_NS2, "line");
-    bottomLine.setAttribute("x1", "0");
-    bottomLine.setAttribute("y1", String(axisY + gapRowH));
-    bottomLine.setAttribute("x2", String(totalWidth));
-    bottomLine.setAttribute("y2", String(axisY + gapRowH));
-    bottomLine.setAttribute("stroke", "var(--background-modifier-border)");
-    bottomLine.setAttribute("stroke-width", "0.5");
-    this.svg.appendChild(bottomLine);
+    const rightLine = document.createElementNS(SVG_NS2, "line");
+    rightLine.setAttribute("x1", String(axisX + gapColW));
+    rightLine.setAttribute("y1", "0");
+    rightLine.setAttribute("x2", String(axisX + gapColW));
+    rightLine.setAttribute("y2", String(totalHeight));
+    rightLine.setAttribute("stroke", "var(--background-modifier-border)");
+    rightLine.setAttribute("stroke-width", "0.5");
+    this.svg.appendChild(rightLine);
   }
   // ----------------------------------------------------------
-  // レーン行の背景（縞模様）と区切り線
+  // レーン列の背景（縞模様）と区切り線
   // ----------------------------------------------------------
-  drawLaneRows(totalWidth, lanesStartY, rowH, lanes) {
+  drawLaneColumns(totalHeight, lanesStartX, colW, lanes) {
     for (let i = 0; i < lanes; i++) {
-      const y = lanesStartY + i * rowH;
+      const x = lanesStartX + i * colW;
       if (i % 2 === 1) {
         const bg = document.createElementNS(SVG_NS2, "rect");
-        bg.setAttribute("x", "0");
-        bg.setAttribute("y", String(y));
-        bg.setAttribute("width", String(totalWidth));
-        bg.setAttribute("height", String(rowH));
+        bg.setAttribute("x", String(x));
+        bg.setAttribute("y", "0");
+        bg.setAttribute("width", String(colW));
+        bg.setAttribute("height", String(totalHeight));
         bg.setAttribute("fill", "var(--background-secondary)");
         bg.setAttribute("fill-opacity", "0.5");
         this.svg.appendChild(bg);
       }
       const line = document.createElementNS(SVG_NS2, "line");
-      line.setAttribute("x1", "0");
-      line.setAttribute("y1", String(y));
-      line.setAttribute("x2", String(totalWidth));
-      line.setAttribute("y2", String(y));
+      line.setAttribute("x1", String(x));
+      line.setAttribute("y1", "0");
+      line.setAttribute("x2", String(x));
+      line.setAttribute("y2", String(totalHeight));
       line.setAttribute("stroke", "var(--background-modifier-border)");
       line.setAttribute("stroke-width", "0.5");
       this.svg.appendChild(line);
     }
-    const bottomY = lanesStartY + lanes * rowH;
-    const bottomLine = document.createElementNS(SVG_NS2, "line");
-    bottomLine.setAttribute("x1", "0");
-    bottomLine.setAttribute("y1", String(bottomY));
-    bottomLine.setAttribute("x2", String(totalWidth));
-    bottomLine.setAttribute("y2", String(bottomY));
-    bottomLine.setAttribute("stroke", "var(--background-modifier-border)");
-    bottomLine.setAttribute("stroke-width", "0.5");
-    this.svg.appendChild(bottomLine);
+    const rightX = lanesStartX + lanes * colW;
+    const rightLine = document.createElementNS(SVG_NS2, "line");
+    rightLine.setAttribute("x1", String(rightX));
+    rightLine.setAttribute("y1", "0");
+    rightLine.setAttribute("x2", String(rightX));
+    rightLine.setAttribute("y2", String(totalHeight));
+    rightLine.setAttribute("stroke", "var(--background-modifier-border)");
+    rightLine.setAttribute("stroke-width", "0.5");
+    this.svg.appendChild(rightLine);
   }
   // ----------------------------------------------------------
-  // 時間軸（水平線）— 帯背景 + 中央線
+  // 時間軸（垂直線）— 帯背景 + 中央線
   // ----------------------------------------------------------
-  drawTimeAxis(axisY, totalWidth) {
+  drawTimeAxis(axisX, totalHeight) {
     let defs = this.svg.querySelector("defs");
     if (!defs) {
       defs = document.createElementNS(SVG_NS2, "defs");
@@ -2961,8 +2972,8 @@ var TimelineRenderer = class {
       grad.setAttribute("id", gradId);
       grad.setAttribute("x1", "0%");
       grad.setAttribute("y1", "0%");
-      grad.setAttribute("x2", "0%");
-      grad.setAttribute("y2", "100%");
+      grad.setAttribute("x2", "100%");
+      grad.setAttribute("y2", "0%");
       for (const [offset, opacity] of [["0%", "0"], ["50%", "0.12"], ["100%", "0"]]) {
         const stop = document.createElementNS(SVG_NS2, "stop");
         stop.setAttribute("offset", offset);
@@ -2973,68 +2984,71 @@ var TimelineRenderer = class {
       defs.appendChild(grad);
     }
     const band = document.createElementNS(SVG_NS2, "rect");
-    band.setAttribute("x", "0");
-    band.setAttribute("y", String(axisY - 8));
-    band.setAttribute("width", String(totalWidth));
-    band.setAttribute("height", "16");
+    band.setAttribute("x", String(axisX - 8));
+    band.setAttribute("y", "0");
+    band.setAttribute("width", "16");
+    band.setAttribute("height", String(totalHeight));
     band.setAttribute("fill", `url(#${gradId})`);
     this.svg.appendChild(band);
     const line = document.createElementNS(SVG_NS2, "line");
-    line.setAttribute("x1", "0");
-    line.setAttribute("y1", String(axisY));
-    line.setAttribute("x2", String(totalWidth));
-    line.setAttribute("y2", String(axisY));
+    line.setAttribute("x1", String(axisX));
+    line.setAttribute("y1", "0");
+    line.setAttribute("x2", String(axisX));
+    line.setAttribute("y2", String(totalHeight));
     line.setAttribute("stroke", "var(--interactive-accent)");
     line.setAttribute("stroke-width", "1.5");
     line.setAttribute("stroke-opacity", "0.5");
     this.svg.appendChild(line);
   }
   // ----------------------------------------------------------
-  // 日付ルーラー（年・月のみ。スクロール追従で常に上部固定表示）
+  // 年・月ラベル（左側固定列。スクロール追従で常に左端固定表示）
   // ----------------------------------------------------------
-  drawDateRuler(ctx, visLeft, visRight) {
-    const { dateRows, virtualWindow, axisY } = ctx;
+  drawDateColumn(ctx, visTop, visBottom, scrollLeft) {
+    const { dateRows, virtualWindow } = ctx;
+    const bg = document.createElementNS(SVG_NS2, "rect");
+    bg.setAttribute("x", String(scrollLeft));
+    bg.setAttribute("y", "0");
+    bg.setAttribute("width", String(YEAR_COL_W + MONTH_COL_W));
+    bg.setAttribute("height", String(ctx.totalHeight));
+    bg.setAttribute("fill", "var(--background-primary-alt)");
+    this.svg.appendChild(bg);
     if (dateRows.length === 0) return;
-    const stickyY = virtualWindow.scrollTop;
+    const stickyX = scrollLeft;
+    void virtualWindow;
     let prevYear = -1;
     let prevMonth = -1;
     for (const row of dateRows) {
-      if (row.x < visLeft - 60 || row.x > visRight + 60) {
+      if (row.y < visTop - 60 || row.y > visBottom + 60) {
         prevYear = row.year;
         prevMonth = row.month;
         continue;
       }
       if (row.year !== prevYear) {
-        this.drawYearCard(row.year, row.x, stickyY, axisY);
+        this.drawYearCell(row.year, row.y, stickyX);
         prevYear = row.year;
         prevMonth = -1;
       }
       if (row.month !== prevMonth) {
-        this.drawMonthBadge(row.monthLabel, row.x, stickyY);
+        this.drawMonthCell(row.monthLabel, row.y, stickyX);
         prevMonth = row.month;
       }
     }
   }
-  /**
-   * 年表示（枠なし）。
-   * 区切り線は時間軸（axisY）までで終わり、GAPレーンやイベントレーンへは伸ばさない。
-   * （月の区切り線と重なって実線のように見えてしまうのを防ぐため）
-   */
-  drawYearCard(year, x, stickyY, axisY) {
+  /** 年表示（枠なし・年列の幅ぶんだけ区切り線を引く） */
+  drawYearCell(year, y, stickyX) {
     const label = `${year}\u5E74`;
-    const textY = stickyY + 14;
     const line = document.createElementNS(SVG_NS2, "line");
-    line.setAttribute("x1", String(x));
-    line.setAttribute("y1", String(stickyY + 4));
-    line.setAttribute("x2", String(x));
-    line.setAttribute("y2", String(axisY));
+    line.setAttribute("x1", String(stickyX + 4));
+    line.setAttribute("y1", String(y));
+    line.setAttribute("x2", String(stickyX + YEAR_COL_W));
+    line.setAttribute("y2", String(y));
     line.setAttribute("stroke", "var(--text-muted)");
     line.setAttribute("stroke-width", "1");
     line.setAttribute("stroke-opacity", "0.4");
     this.svg.appendChild(line);
     const text = document.createElementNS(SVG_NS2, "text");
-    text.setAttribute("x", String(x + 5));
-    text.setAttribute("y", String(textY));
+    text.setAttribute("x", String(stickyX + 5));
+    text.setAttribute("y", String(y - 6));
     text.setAttribute("text-anchor", "start");
     text.setAttribute("dominant-baseline", "central");
     text.setAttribute("font-size", "12");
@@ -3043,22 +3057,22 @@ var TimelineRenderer = class {
     text.textContent = label;
     this.svg.appendChild(text);
   }
-  /** 月表示（枠なし・時間軸へ縦線でつなぐ） */
-  drawMonthBadge(monthLabel, x, stickyY) {
-    const textY = stickyY + 34;
+  /** 月表示（枠なし・月列の幅ぶんだけ区切り線を引く） */
+  drawMonthCell(monthLabel, y, stickyX) {
+    const colX = stickyX + YEAR_COL_W;
     const line = document.createElementNS(SVG_NS2, "line");
-    line.setAttribute("x1", String(x));
-    line.setAttribute("y1", String(stickyY + 24));
-    line.setAttribute("x2", String(x));
-    line.setAttribute("y2", "9999");
+    line.setAttribute("x1", String(colX));
+    line.setAttribute("y1", String(y));
+    line.setAttribute("x2", String(colX + MONTH_COL_W));
+    line.setAttribute("y2", String(y));
     line.setAttribute("stroke", "var(--text-muted)");
     line.setAttribute("stroke-width", "0.6");
     line.setAttribute("stroke-opacity", "0.25");
     line.setAttribute("stroke-dasharray", "3 4");
     this.svg.appendChild(line);
     const text = document.createElementNS(SVG_NS2, "text");
-    text.setAttribute("x", String(x + 5));
-    text.setAttribute("y", String(textY));
+    text.setAttribute("x", String(colX + 5));
+    text.setAttribute("y", String(y - 6));
     text.setAttribute("text-anchor", "start");
     text.setAttribute("dominant-baseline", "central");
     text.setAttribute("font-size", "10");
@@ -3068,85 +3082,108 @@ var TimelineRenderer = class {
     this.svg.appendChild(text);
   }
   // ----------------------------------------------------------
-  // レーン番号ラベル（左側固定列。スクロール追従で常に左端固定表示）
+  // レーン番号ヘッダー行（上部固定。スクロール追従で常に上端固定表示）
   // ----------------------------------------------------------
-  drawLaneLabelColumn(axisY, gapRowH, rowH, lanes, scrollLeft) {
-    const colX = scrollLeft;
-    const lanesStartY = axisY + gapRowH;
+  drawLaneHeaderRow(lanesStartX, colW, lanes, headerH, scrollTop) {
+    const rowY = scrollTop;
     const bg = document.createElementNS(SVG_NS2, "rect");
-    bg.setAttribute("x", String(colX));
-    bg.setAttribute("y", String(axisY));
-    bg.setAttribute("width", String(LANE_LABEL_W));
-    bg.setAttribute("height", String(gapRowH + lanes * rowH));
+    bg.setAttribute("x", String(lanesStartX));
+    bg.setAttribute("y", String(rowY));
+    bg.setAttribute("width", String(lanes * colW));
+    bg.setAttribute("height", String(headerH));
     bg.setAttribute("fill", "var(--background-primary-alt)");
     this.svg.appendChild(bg);
-    const gapLabelY = axisY + gapRowH / 2;
-    const gapText = document.createElementNS(SVG_NS2, "text");
-    gapText.setAttribute("x", String(colX + LANE_LABEL_W / 2));
-    gapText.setAttribute("y", String(gapLabelY));
-    gapText.setAttribute("text-anchor", "middle");
-    gapText.setAttribute("dominant-baseline", "central");
-    gapText.setAttribute("font-size", "10");
-    gapText.setAttribute("font-weight", "600");
-    gapText.setAttribute("fill", "var(--text-muted)");
-    gapText.setAttribute("letter-spacing", "0.5");
-    gapText.textContent = "GAP";
-    this.svg.appendChild(gapText);
-    const gapDivider = document.createElementNS(SVG_NS2, "line");
-    gapDivider.setAttribute("x1", String(colX));
-    gapDivider.setAttribute("y1", String(lanesStartY));
-    gapDivider.setAttribute("x2", String(colX + LANE_LABEL_W));
-    gapDivider.setAttribute("y2", String(lanesStartY));
-    gapDivider.setAttribute("stroke", "var(--background-modifier-border)");
-    gapDivider.setAttribute("stroke-width", "1");
-    this.svg.appendChild(gapDivider);
     for (let i = 0; i < lanes; i++) {
       const lane = LANE_MIN + i;
-      const y = lanesStartY + i * rowH + rowH / 2;
+      const x = lanesStartX + i * colW + colW / 2;
       const text = document.createElementNS(SVG_NS2, "text");
-      text.setAttribute("x", String(colX + LANE_LABEL_W / 2));
-      text.setAttribute("y", String(y));
+      text.setAttribute("x", String(x));
+      text.setAttribute("y", String(rowY + headerH / 2));
       text.setAttribute("text-anchor", "middle");
       text.setAttribute("dominant-baseline", "central");
-      text.setAttribute("font-size", "13");
+      text.setAttribute("font-size", "12");
       text.setAttribute("fill", "var(--text-muted)");
-      text.textContent = String(lane);
+      text.textContent = `\u30EC\u30FC\u30F3${lane}`;
       this.svg.appendChild(text);
     }
+    const bline = document.createElementNS(SVG_NS2, "line");
+    bline.setAttribute("x1", String(lanesStartX));
+    bline.setAttribute("y1", String(rowY + headerH));
+    bline.setAttribute("x2", String(lanesStartX + lanes * colW));
+    bline.setAttribute("y2", String(rowY + headerH));
+    bline.setAttribute("stroke", "var(--background-modifier-border)");
+    bline.setAttribute("stroke-width", "1");
+    this.svg.appendChild(bline);
+  }
+  /**
+   * 左上コーナー（年・月・GAP列の見出しを表示。
+   * 上下左右どちらのスクロールにも追従して固定表示する）
+   */
+  drawCornerHeader(scrollLeft, scrollTop, headerH, calendarName) {
+    const bg = document.createElementNS(SVG_NS2, "rect");
+    bg.setAttribute("x", String(scrollLeft));
+    bg.setAttribute("y", String(scrollTop));
+    bg.setAttribute("width", String(LANES_START_X));
+    bg.setAttribute("height", String(headerH));
+    bg.setAttribute("fill", "var(--background-primary-alt)");
+    this.svg.appendChild(bg);
+    if (calendarName) {
+      const title = document.createElementNS(SVG_NS2, "title");
+      title.textContent = calendarName;
+      bg.appendChild(title);
+    }
+    const cells = [
+      { label: "\u5E74", x: scrollLeft, w: YEAR_COL_W },
+      { label: "\u6708", x: scrollLeft + YEAR_COL_W, w: MONTH_COL_W },
+      { label: "GAP", x: scrollLeft + YEAR_COL_W + MONTH_COL_W, w: GAP_COL_W }
+    ];
+    for (const cell of cells) {
+      const text = document.createElementNS(SVG_NS2, "text");
+      text.setAttribute("x", String(cell.x + cell.w / 2));
+      text.setAttribute("y", String(scrollTop + headerH / 2));
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("dominant-baseline", "central");
+      text.setAttribute("font-size", "10");
+      text.setAttribute("font-weight", "600");
+      text.setAttribute("fill", "var(--text-muted)");
+      text.setAttribute("letter-spacing", "0.5");
+      text.textContent = cell.label;
+      this.svg.appendChild(text);
+      const divider = document.createElementNS(SVG_NS2, "line");
+      divider.setAttribute("x1", String(cell.x));
+      divider.setAttribute("y1", String(scrollTop));
+      divider.setAttribute("x2", String(cell.x));
+      divider.setAttribute("y2", String(scrollTop + headerH));
+      divider.setAttribute("stroke", "var(--background-modifier-border)");
+      divider.setAttribute("stroke-width", "0.6");
+      this.svg.appendChild(divider);
+    }
+    const bline = document.createElementNS(SVG_NS2, "line");
+    bline.setAttribute("x1", String(scrollLeft));
+    bline.setAttribute("y1", String(scrollTop + headerH));
+    bline.setAttribute("x2", String(scrollLeft + LANES_START_X));
+    bline.setAttribute("y2", String(scrollTop + headerH));
+    bline.setAttribute("stroke", "var(--background-modifier-border)");
+    bline.setAttribute("stroke-width", "1");
+    this.svg.appendChild(bline);
     const rline = document.createElementNS(SVG_NS2, "line");
-    rline.setAttribute("x1", String(colX + LANE_LABEL_W));
-    rline.setAttribute("y1", String(axisY));
-    rline.setAttribute("x2", String(colX + LANE_LABEL_W));
-    rline.setAttribute("y2", String(lanesStartY + lanes * rowH));
+    rline.setAttribute("x1", String(scrollLeft + LANES_START_X));
+    rline.setAttribute("y1", String(scrollTop));
+    rline.setAttribute("x2", String(scrollLeft + LANES_START_X));
+    rline.setAttribute("y2", String(scrollTop + headerH));
     rline.setAttribute("stroke", "var(--background-modifier-border)");
     rline.setAttribute("stroke-width", "1");
     this.svg.appendChild(rline);
   }
-  /** 左上コーナー（暦名を表示。上下左右どちらのスクロールにも追従して固定表示） */
-  drawCornerBox(scrollLeft, scrollTop, headerH) {
-    const bg = document.createElementNS(SVG_NS2, "rect");
-    bg.setAttribute("x", String(scrollLeft));
-    bg.setAttribute("y", String(scrollTop));
-    bg.setAttribute("width", String(LANE_LABEL_W));
-    bg.setAttribute("height", String(headerH));
-    bg.setAttribute("fill", "var(--background-primary-alt)");
-    this.svg.appendChild(bg);
-    const border = document.createElementNS(SVG_NS2, "line");
-    border.setAttribute("x1", String(scrollLeft));
-    border.setAttribute("y1", String(scrollTop + headerH));
-    border.setAttribute("x2", String(scrollLeft + LANE_LABEL_W));
-    border.setAttribute("y2", String(scrollTop + headerH));
-    border.setAttribute("stroke", "var(--background-modifier-border)");
-    border.setAttribute("stroke-width", "1");
-    this.svg.appendChild(border);
-  }
   // ----------------------------------------------------------
   // ノード描画（日にちバッジ）
   // ----------------------------------------------------------
-  drawNodes(ctx, visLeft, visRight) {
+  drawNodes(ctx, visTop, visBottom, visLeft, visRight) {
     for (const node of ctx.nodes) {
-      const w = this.estimatePillWidth(node);
-      if (node.x + w < visLeft || node.x > visRight) continue;
+      const w = this.estimateClampedPillWidth(node);
+      const h = node.radius * 2;
+      if (node.y + h < visTop || node.y > visBottom) continue;
+      if (node.x + w / 2 < visLeft || node.x - w / 2 > visRight) continue;
       const isFiltered = ctx.filteredIds !== null && !ctx.filteredIds.has(node.event.id);
       const isSelected = node.event.id === ctx.selectedId;
       this.drawNode(node, isFiltered, isSelected, ctx);
@@ -3159,30 +3196,33 @@ var TimelineRenderer = class {
   estimateFontSize(node) {
     return estimateNodeFontSize(node.radius);
   }
-  estimatePillWidth(node) {
-    return estimateNodePillWidth(node.event, node.radius);
+  /** レーン列幅にクランプしたノード横幅(px) */
+  estimateClampedPillWidth(node) {
+    const raw = estimateNodePillWidth(node.event, node.radius);
+    const maxW = LANE_COL_W - 8;
+    return Math.min(raw, Math.max(16, maxW));
   }
-  /** ノードの視覚上の中心X座標（関係線・ホバー基準などに使用） */
-  nodeCenterX(node) {
-    return node.x + this.estimatePillWidth(node) / 2;
+  /** ノードの視覚上の中心Y座標（関係線・ホバー基準などに使用） */
+  nodeCenterY(node) {
+    return node.y + node.radius;
   }
   /**
-   * サイズ別のノード形状を生成する。
+   * サイズ別のノード形状を生成する（縦軸方向に長さを持つ）。
    *   小 (small)  : 長方形
    *   中 (medium) : 楕円形
-   *   大 (big)    : 横長の六角形
+   *   大 (big)    : 横長の六角形（左右が尖る）
    *
-   * @param x       ノード左端のSVG X座標（時間軸上の日付起点）
-   * @param y       ノード中心のSVG Y座標
+   * @param cx      ノード中心のSVG X座標（レーン列の中心）
+   * @param topY    ノード上端のSVG Y座標（時間軸上の日付起点）
    * @param w       ノード全体の幅(px)
    * @param h       ノード全体の高さ(px)
    */
-  buildNodeShape(size, x, y, w, h, fill, fillOpacity, stroke, strokeWidth) {
-    const halfH = h / 2;
+  buildNodeShape(size, cx, topY, w, h, fill, fillOpacity, stroke, strokeWidth) {
+    const halfW = w / 2;
     if (size === "small") {
       const rect = document.createElementNS(SVG_NS2, "rect");
-      rect.setAttribute("x", String(x));
-      rect.setAttribute("y", String(y - halfH));
+      rect.setAttribute("x", String(cx - halfW));
+      rect.setAttribute("y", String(topY));
       rect.setAttribute("width", String(w));
       rect.setAttribute("height", String(h));
       rect.setAttribute("rx", "1.5");
@@ -3190,14 +3230,16 @@ var TimelineRenderer = class {
       return rect;
     }
     if (size === "big") {
+      const halfH = h / 2;
+      const midY = topY + halfH;
       const notch = Math.min(halfH * 0.7, w / 3);
       const points = [
-        `${x + notch},${y - halfH}`,
-        `${x + w - notch},${y - halfH}`,
-        `${x + w},${y}`,
-        `${x + w - notch},${y + halfH}`,
-        `${x + notch},${y + halfH}`,
-        `${x},${y}`
+        `${cx - halfW + notch},${topY}`,
+        `${cx + halfW - notch},${topY}`,
+        `${cx + halfW},${midY}`,
+        `${cx + halfW - notch},${topY + h}`,
+        `${cx - halfW + notch},${topY + h}`,
+        `${cx - halfW},${midY}`
       ].join(" ");
       const hex = document.createElementNS(SVG_NS2, "polygon");
       hex.setAttribute("points", points);
@@ -3205,10 +3247,10 @@ var TimelineRenderer = class {
       return hex;
     }
     const ellipse = document.createElementNS(SVG_NS2, "ellipse");
-    ellipse.setAttribute("cx", String(x + w / 2));
-    ellipse.setAttribute("cy", String(y));
-    ellipse.setAttribute("rx", String(w / 2));
-    ellipse.setAttribute("ry", String(halfH));
+    ellipse.setAttribute("cx", String(cx));
+    ellipse.setAttribute("cy", String(topY + h / 2));
+    ellipse.setAttribute("rx", String(halfW));
+    ellipse.setAttribute("ry", String(h / 2));
     this.applyShapeStyle(ellipse, fill, fillOpacity, stroke, strokeWidth);
     return ellipse;
   }
@@ -3223,10 +3265,9 @@ var TimelineRenderer = class {
     g.setAttribute("class", "ntj-node");
     const text = this.dayLabel(node);
     const fontSize = this.estimateFontSize(node);
-    const halfH = node.radius;
-    const w = this.estimatePillWidth(node);
-    const h = halfH * 2;
-    const centerX = node.x + w / 2;
+    const w = this.estimateClampedPillWidth(node);
+    const h = node.radius * 2;
+    const centerY = node.y + h / 2;
     const colors = ctx.resolveNodeColors(node.event);
     const shape = this.buildNodeShape(
       node.event.size,
@@ -3243,8 +3284,8 @@ var TimelineRenderer = class {
     if (!isFiltered) {
       const label = document.createElementNS(SVG_NS2, "text");
       label.setAttribute("class", "ntj-node-label");
-      label.setAttribute("x", String(centerX));
-      label.setAttribute("y", String(node.y));
+      label.setAttribute("x", String(node.x));
+      label.setAttribute("y", String(centerY));
       label.setAttribute("text-anchor", "middle");
       label.setAttribute("dominant-baseline", "central");
       label.setAttribute("font-size", String(fontSize));
@@ -3255,8 +3296,8 @@ var TimelineRenderer = class {
     }
     if (node.event.error) {
       const warn = document.createElementNS(SVG_NS2, "text");
-      warn.setAttribute("x", String(node.x + w - 2));
-      warn.setAttribute("y", String(node.y - halfH + 2));
+      warn.setAttribute("x", String(node.x + w / 2 - 2));
+      warn.setAttribute("y", String(node.y + 2));
       warn.setAttribute("font-size", "10");
       warn.setAttribute("dominant-baseline", "auto");
       warn.setAttribute("fill", COLOR.errorIcon);
@@ -3286,7 +3327,7 @@ var TimelineRenderer = class {
   // ----------------------------------------------------------
   // 関係線描画
   // ----------------------------------------------------------
-  drawRelations(ctx, visLeft, visRight, _defs) {
+  drawRelations(ctx, visTop, visBottom) {
     const { edges, selectedId, settings } = ctx;
     const mode = settings.relationDisplayMode;
     if (mode === "hidden") return;
@@ -3294,8 +3335,8 @@ var TimelineRenderer = class {
       if (mode === "selected") {
         if (edge.fromId !== selectedId && edge.toId !== selectedId) continue;
       }
-      const fromInView = edge.fromNode.x >= visLeft && edge.fromNode.x <= visRight;
-      const toInView = edge.toNode.x >= visLeft && edge.toNode.x <= visRight;
+      const fromInView = edge.fromNode.y >= visTop && edge.fromNode.y <= visBottom;
+      const toInView = edge.toNode.y >= visTop && edge.toNode.y <= visBottom;
       if (!fromInView && !toInView) continue;
       this.drawBezierEdge(edge, settings);
     }
@@ -3303,11 +3344,13 @@ var TimelineRenderer = class {
   drawBezierEdge(edge, settings) {
     const { fromNode, toNode } = edge;
     const strength = settings.relationCurveStrength;
-    const fromX = this.nodeCenterX(fromNode);
-    const toX = this.nodeCenterX(toNode);
-    const dx = toX - fromX;
-    const cpOffset = strength / 100 * Math.max(40, Math.abs(dx) * 0.4);
-    const d = `M ${fromX} ${fromNode.y} C ${fromX + dx * 0.3} ${fromNode.y + cpOffset}, ${toX - dx * 0.3} ${toNode.y - cpOffset}, ${toX} ${toNode.y}`;
+    const fromX = fromNode.x;
+    const toX = toNode.x;
+    const fromY = this.nodeCenterY(fromNode);
+    const toY = this.nodeCenterY(toNode);
+    const dy = toY - fromY;
+    const cpOffset = strength / 100 * Math.max(40, Math.abs(dy) * 0.4);
+    const d = `M ${fromX} ${fromY} C ${fromX + cpOffset} ${fromY + dy * 0.3}, ${toX - cpOffset} ${toY - dy * 0.3}, ${toX} ${toY}`;
     const path = document.createElementNS(SVG_NS2, "path");
     path.setAttribute("d", d);
     path.setAttribute("fill", "none");
@@ -3365,24 +3408,24 @@ var TimelineRenderer = class {
   // ----------------------------------------------------------
   // Gap 描画
   // ----------------------------------------------------------
-  drawGaps(ctx, visLeft, visRight, axisY, gapRowH) {
+  drawGaps(ctx, visTop, visBottom, axisX, gapColW) {
     for (const gap of ctx.gaps) {
-      if (gap.y < visLeft || gap.y > visRight) continue;
+      if (gap.y < visTop || gap.y > visBottom) continue;
       const gapDays = Math.max(0, gap.toOrder - gap.fromOrder - 1);
-      const slotWidth = gap.expanded ? Math.max(EXPANDED_MIN_WIDTH, gapDays * EXPANDED_PX_PER_DAY) : GAP_SLOT_WIDTH;
-      const el = this.gapRenderer.render(gap, axisY, gapRowH, slotWidth);
+      const slotHeight = gap.expanded ? Math.max(EXPANDED_MIN_HEIGHT, gapDays * EXPANDED_PX_PER_DAY) : GAP_SLOT_HEIGHT;
+      const el = this.gapRenderer.render(gap, axisX, gapColW, slotHeight);
       el.addEventListener("click", () => ctx.onGapClick(gap));
       this.svg.appendChild(el);
     }
   }
   // ----------------------------------------------------------
-  // Drag & Drop（レーン変更のみ・縦方向にドラッグする）
+  // Drag & Drop（レーン変更のみ・横方向にドラッグする）
   // ----------------------------------------------------------
   startDrag(e, node, g) {
     this.dragState = {
       active: true,
       eventId: node.event.id,
-      startY: e.clientY,
+      startX: e.clientX,
       circle: g,
       originalLane: node.event.lane
     };
@@ -3390,19 +3433,17 @@ var TimelineRenderer = class {
   }
   onDragMove(e, _ctx) {
     if (!this.dragState.active || !this.dragState.circle) return;
-    const totalClientDy = e.clientY - this.dragState.startY;
-    const totalSvgDy = this.clientDyToSvgDy(totalClientDy);
-    const originY = this.laneToSvgY(this.dragState.originalLane, this._lastLanesStartY);
-    this.dragState.circle.setAttribute("transform", `translate(0, ${totalSvgDy})`);
-    void originY;
+    const totalClientDx = e.clientX - this.dragState.startX;
+    const totalSvgDx = this.clientDxToSvgDx(totalClientDx);
+    this.dragState.circle.setAttribute("transform", `translate(${totalSvgDx}, 0)`);
   }
   onDragEnd(e, ctx) {
     if (!this.dragState.active) return;
-    const totalClientDy = e.clientY - this.dragState.startY;
-    const totalSvgDy = this.clientDyToSvgDy(totalClientDy);
-    const originY = this.laneToSvgY(this.dragState.originalLane, this._lastLanesStartY);
-    const droppedY = originY + totalSvgDy;
-    const targetLane = this.svgYToLane(droppedY, this._lastLanesStartY);
+    const totalClientDx = e.clientX - this.dragState.startX;
+    const totalSvgDx = this.clientDxToSvgDx(totalClientDx);
+    const originX = this.laneToSvgX(this.dragState.originalLane, this._lastLaneCount);
+    const droppedX = originX + totalSvgDx;
+    const targetLane = this.svgXToLane(droppedX, this._lastLaneCount);
     ctx.onLaneDrop(this.dragState.eventId, targetLane);
     if (this.dragState.circle) {
       this.dragState.circle.removeClass("is-dragging");
@@ -3410,18 +3451,20 @@ var TimelineRenderer = class {
     }
     this.dragState.active = false;
   }
-  /** lane番号(1〜10) → SVG Y座標（LayoutEngine.calcY と同じ式） */
-  laneToSvgY(lane, headerH) {
-    const clamped = Math.max(LANE_MIN, Math.min(LANE_MAX, lane));
-    return headerH + (clamped - LANE_MIN) * ROW_HEIGHT + ROW_HEIGHT / 2;
+  /** lane番号(1〜laneCount) → SVG X座標（LayoutEngine.calcX と同じ式） */
+  laneToSvgX(lane, laneCount) {
+    const laneMax = Math.max(LANE_MIN, laneCount);
+    const clamped = Math.max(LANE_MIN, Math.min(laneMax, lane));
+    return LANES_START_X + (clamped - LANE_MIN) * LANE_COL_W + LANE_COL_W / 2;
   }
-  /** SVG Y座標 → 最近傍のlane番号（1〜10） */
-  svgYToLane(y, headerH) {
+  /** SVG X座標 → 最近傍のlane番号（1〜laneCount） */
+  svgXToLane(x, laneCount) {
+    const laneMax = Math.max(LANE_MIN, laneCount);
     let bestLane = LANE_MIN;
     let bestDist = Infinity;
-    for (let lane = LANE_MIN; lane <= LANE_MAX; lane++) {
-      const ly = this.laneToSvgY(lane, headerH);
-      const dist = Math.abs(y - ly);
+    for (let lane = LANE_MIN; lane <= laneMax; lane++) {
+      const lx = this.laneToSvgX(lane, laneCount);
+      const dist = Math.abs(x - lx);
       if (dist < bestDist) {
         bestDist = dist;
         bestLane = lane;
@@ -3429,14 +3472,14 @@ var TimelineRenderer = class {
     }
     return bestLane;
   }
-  /** クライアントpx差分 → SVGユーザー座標差分（Y方向） */
-  clientDyToSvgDy(clientDy) {
+  /** クライアントpx差分 → SVGユーザー座標差分（X方向） */
+  clientDxToSvgDx(clientDx) {
     var _a;
     const ctm = this.svg.getScreenCTM();
-    if (ctm && ctm.d !== 0) return clientDy / ctm.d;
+    if (ctm && ctm.a !== 0) return clientDx / ctm.a;
     const rect = this.svg.getBoundingClientRect();
-    const totalH = parseFloat((_a = this.svg.getAttribute("height")) != null ? _a : "600");
-    return clientDy * (totalH / (rect.height || totalH));
+    const totalW = parseFloat((_a = this.svg.getAttribute("width")) != null ? _a : "600");
+    return clientDx * (totalW / (rect.width || totalW));
   }
   // ----------------------------------------------------------
   // ユーティリティ
@@ -3619,10 +3662,22 @@ var TimelineView = class extends import_obsidian3.ItemView {
     return TIMELINE_VIEW_TYPE;
   }
   getDisplayText() {
-    return "Novels Timeline JP";
+    var _a;
+    const calendarName = (_a = this.plugin.settings.calendar.name) == null ? void 0 : _a.trim();
+    return calendarName ? `Novels Timeline JP - ${calendarName}` : "Novels Timeline JP";
   }
   getIcon() {
-    return "book-open";
+    return "timeline";
+  }
+  /**
+   * タブのタイトル表示を最新の getDisplayText() で更新する。
+   * Obsidian は暦名変更のような内部状態変化を自動検知しないため、
+   * 明示的に呼び出してタブヘッダーを再描画させる必要がある。
+   * updateHeader() は型定義に含まれないランタイムAPIのため any 経由で呼ぶ。
+   */
+  updateTabTitle() {
+    var _a, _b;
+    (_b = (_a = this.leaf).updateHeader) == null ? void 0 : _b.call(_a);
   }
   /** 現在保持している全イベントを返す（EventSidebarView の関連イベント選択などから使用） */
   getAllEvents() {
@@ -3632,6 +3687,7 @@ var TimelineView = class extends import_obsidian3.ItemView {
     await this.buildUI();
     await this.loadAll();
     this.registerFileWatcher();
+    this.updateTabTitle();
   }
   async onClose() {
     var _a;
@@ -3798,7 +3854,7 @@ var TimelineView = class extends import_obsidian3.ItemView {
     });
     this.viewModeBtn = this.toolbarEl.createEl("button", {
       cls: "ntj-btn ntj-view-mode-btn",
-      text: "\u4E00\u89A7\u8868\u793A"
+      text: "\u30C6\u30FC\u30D6\u30EB\u8868\u793A"
     });
     this.viewModeBtn.addEventListener("click", () => {
       this.toggleViewMode();
@@ -3987,20 +4043,21 @@ var TimelineView = class extends import_obsidian3.ItemView {
     const validEvents = allEvents.filter((e) => !e.error);
     const filtered = this.filterEngine.apply(validEvents, this.filterState);
     const filteredIds = filtered.length < validEvents.length ? new Set(filtered.map((e) => e.id)) : null;
-    const tempXMap = this.layoutEngine.calcXPositions(
+    const tempYMap = this.layoutEngine.calcYPositions(
       validEvents,
       [],
       settings.gapCompression
     );
-    this.gaps = settings.gapCompression ? this.gapEngine.buildGaps(validEvents, tempXMap, settings.gapThreshold) : [];
+    this.gaps = settings.gapCompression ? this.gapEngine.buildGaps(validEvents, tempYMap, settings.gapThreshold) : [];
     this.nodes = this.layoutEngine.buildLayout(
       validEvents,
-      LANES_START_Y,
+      settings.laneCount,
       this.gaps,
       settings.gapCompression
     );
     this.gapEngine.updateGapYPositions(this.gaps, this.nodes);
-    const totalWidth = this.layoutEngine.calcTotalWidth(this.nodes);
+    const totalWidth = this.layoutEngine.calcTotalWidth(settings.laneCount);
+    const totalHeight = this.layoutEngine.calcTotalHeight(this.nodes);
     const edges = this.relationEngine.buildEdges(validEvents, this.nodes);
     const zoomFactor = this.plugin.settings.boardZoom / 100;
     const virtualWindow = {
@@ -4018,6 +4075,7 @@ var TimelineView = class extends import_obsidian3.ItemView {
       selectedId: this.selectedId,
       settings,
       totalWidth,
+      totalHeight,
       virtualWindow,
       dateRows: this.buildDateRows(validEvents, this.nodes),
       onNodeClick: (event, _node, mx, my) => {
@@ -4028,7 +4086,7 @@ var TimelineView = class extends import_obsidian3.ItemView {
       onNodeLeave: () => {
       },
       onGapClick: (gap) => this.handleGapClick(gap),
-      onContextMenu: (svgX, mx, my, lane) => this.handleContextMenu(svgX, mx, my, lane),
+      onContextMenu: (svgY, mx, my, lane) => this.handleContextMenu(svgY, mx, my, lane),
       onLaneDrop: (eventId, targetLane) => this.handleLaneDrop(eventId, targetLane),
       resolveNodeColors: (event) => this.plugin.colorPresetStore.resolve(event.color)
     });
@@ -4074,7 +4132,7 @@ var TimelineView = class extends import_obsidian3.ItemView {
       this.viewMode = "timeline";
       this.timelineEl.toggleClass("is-hidden", false);
       this.tableContainerEl.toggleClass("is-visible", false);
-      this.viewModeBtn.textContent = "\u4E00\u89A7\u8868\u793A";
+      this.viewModeBtn.textContent = "\u30C6\u30FC\u30D6\u30EB\u8868\u793A";
       this.viewModeBtn.removeClass("is-active");
     }
   }
@@ -4160,10 +4218,10 @@ var TimelineView = class extends import_obsidian3.ItemView {
     this.gapEngine.toggleExpand(gap);
     this.scheduleRender();
   }
-  handleContextMenu(svgX, mouseX, mouseY, lane) {
+  handleContextMenu(svgY, mouseX, mouseY, lane) {
     const settings = this.plugin.settings;
-    const dateStr = this.layoutEngine.orderFromViewportX(
-      svgX,
+    const dateStr = this.layoutEngine.orderFromViewportY(
+      svgY,
       this.nodes,
       this.gaps,
       settings.gapCompression,
@@ -4210,7 +4268,8 @@ var TimelineView = class extends import_obsidian3.ItemView {
   async handleLaneDrop(eventId, targetLane) {
     const event = this.eventStore.getById(eventId);
     if (!event) return;
-    const newLane = Math.max(LANE_MIN, Math.min(LANE_MAX, targetLane));
+    const laneMax = this.plugin.settings.laneCount;
+    const newLane = Math.max(LANE_MIN, Math.min(laneMax, targetLane));
     if (newLane === event.lane) return;
     const updated = { ...event, lane: newLane };
     this.eventStore.upsert(updated);
@@ -4238,9 +4297,9 @@ var TimelineView = class extends import_obsidian3.ItemView {
     var _a, _b;
     if (sortedEvents.length === 0) return [];
     const dateParser = new DateParser(this.plugin.settings.calendar);
-    const nodeXMap = /* @__PURE__ */ new Map();
+    const nodeYMap = /* @__PURE__ */ new Map();
     for (const node of nodes) {
-      nodeXMap.set(node.event.id, node.x);
+      nodeYMap.set(node.event.id, node.y);
     }
     const seenOrders = /* @__PURE__ */ new Map();
     const calendarPrefix = (_a = this.plugin.settings.calendar.name) != null ? _a : "";
@@ -4251,9 +4310,9 @@ var TimelineView = class extends import_obsidian3.ItemView {
       const { year, month, day } = result.parsed;
       const monthDef = getMonthDef(this.plugin.settings.calendar, month);
       const monthLabel = monthDef && monthDef.name.trim() !== "" ? monthDef.name : `${month}\u6708`;
-      const x = (_b = nodeXMap.get(event.id)) != null ? _b : 0;
+      const y = (_b = nodeYMap.get(event.id)) != null ? _b : 0;
       seenOrders.set(event.timelineOrder, {
-        x,
+        y,
         year,
         month,
         day,
@@ -4261,7 +4320,7 @@ var TimelineView = class extends import_obsidian3.ItemView {
         calendarPrefix
       });
     }
-    return Array.from(seenOrders.values()).sort((a, b) => a.x - b.x);
+    return Array.from(seenOrders.values()).sort((a, b) => a.y - b.y);
   }
   async rebuildAll() {
     await this.cacheStore.clearAll();
@@ -4273,6 +4332,7 @@ var TimelineView = class extends import_obsidian3.ItemView {
     this.discovery.updateExcludedFolders(settings.excludedFolders);
     this.layoutEngine.updateCalendar(settings.calendar);
     this.gapEngine.updateCalendar(settings.calendar);
+    this.updateTabTitle();
     this.scheduleRender();
   }
 };
@@ -4629,11 +4689,12 @@ var EventSidebarView = class extends import_obsidian5.ItemView {
       i.value = dateStr;
       i.placeholder = this.datePlaceholder();
     });
-    this.addField(el, "\u30EC\u30FC\u30F3\uFF081\u301C10\uFF09", (w) => {
+    const laneMax = this.plugin.settings.laneCount;
+    this.addField(el, `\u30EC\u30FC\u30F3\uFF081\u301C${laneMax}\uFF09`, (w) => {
       const s = w.createEl("select", { cls: "ntj-sf-input" });
       s.id = "ntj-f-lane";
-      const clampedLane = Math.max(1, Math.min(10, Math.round(lane)));
-      for (let n = 1; n <= 10; n++) {
+      const clampedLane = Math.max(1, Math.min(laneMax, Math.round(lane)));
+      for (let n = 1; n <= laneMax; n++) {
         const o = s.createEl("option", { text: String(n) });
         o.value = String(n);
         if (n === clampedLane) o.selected = true;
@@ -4715,11 +4776,12 @@ var EventSidebarView = class extends import_obsidian5.ItemView {
       i.value = this.toSlashFormat(event.date);
       i.placeholder = this.datePlaceholder();
     });
-    this.addField(el, "\u30EC\u30FC\u30F3\uFF081\u301C10\uFF09", (w) => {
+    const laneMaxEdit = this.plugin.settings.laneCount;
+    this.addField(el, `\u30EC\u30FC\u30F3\uFF081\u301C${laneMaxEdit}\uFF09`, (w) => {
       const s = w.createEl("select", { cls: "ntj-sf-input" });
       s.id = "ntj-e-lane";
-      const clampedLane = Math.max(1, Math.min(10, Math.round(event.lane)));
-      for (let n = 1; n <= 10; n++) {
+      const clampedLane = Math.max(1, Math.min(laneMaxEdit, Math.round(event.lane)));
+      for (let n = 1; n <= laneMaxEdit; n++) {
         const o = s.createEl("option", { text: String(n) });
         o.value = String(n);
         if (n === clampedLane) o.selected = true;
@@ -4989,9 +5051,10 @@ var EventSidebarView = class extends import_obsidian5.ItemView {
         }
       }
     }
+    const laneMax = this.plugin.settings.laneCount;
     const lane = parseInt(laneStr, 10);
-    if (isNaN(lane) || lane < 1 || lane > 10) {
-      errors.push("\u30EC\u30FC\u30F3\u306F 1\u301C10 \u306E\u6574\u6570\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
+    if (isNaN(lane) || lane < 1 || lane > laneMax) {
+      errors.push(`\u30EC\u30FC\u30F3\u306F 1\u301C${laneMax} \u306E\u6574\u6570\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
     }
     if (!colorVal) {
       errors.push("\u914D\u8272\u30BB\u30C3\u30C8\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
@@ -5284,6 +5347,22 @@ var NovelsTimelineSettingTab = class extends import_obsidian6.PluginSettingTab {
       })
     );
     new import_obsidian6.Setting(containerEl).setName("Timeline").setHeading();
+    new import_obsidian6.Setting(containerEl).setName("Lane count").setDesc(
+      `\u6642\u9593\u8EF8\u306E\u53F3\u5074\u306B\u4E26\u3079\u308B\u30EC\u30FC\u30F3\u5217\u306E\u6570\uFF08${LANE_COUNT_MIN}\u301C${LANE_COUNT_MAX}\uFF09\u3002\u65E2\u5B58\u30A4\u30D9\u30F3\u30C8\u306E\u30EC\u30FC\u30F3\u756A\u53F7\u304C\u3053\u306E\u5024\u3092\u8D85\u3048\u308B\u5834\u5408\u306F\u3001\u8868\u793A\u4E0A\u306F\u6700\u5927\u30EC\u30FC\u30F3\u306B\u4E38\u3081\u3066\u63CF\u753B\u3055\u308C\u307E\u3059\uFF08\u30CE\u30FC\u30C8\u5074\u306E\u5024\u306F\u5909\u66F4\u3055\u308C\u307E\u305B\u3093\uFF09\u3002`
+    ).addSlider(
+      (slider) => slider.setLimits(LANE_COUNT_MIN, LANE_COUNT_MAX, LANE_COUNT_STEP).setValue(this.plugin.settings.laneCount).setDynamicTooltip().onChange(async (value) => {
+        this.plugin.settings.laneCount = value;
+        await this.plugin.saveSettings();
+        this.plugin.notifySettingsChanged();
+      })
+    ).addExtraButton(
+      (btn) => btn.setIcon("reset").setTooltip(`${LANE_COUNT_DEFAULT}\u306B\u623B\u3059`).onClick(async () => {
+        this.plugin.settings.laneCount = LANE_COUNT_DEFAULT;
+        await this.plugin.saveSettings();
+        this.plugin.notifySettingsChanged();
+        this.display();
+      })
+    );
     new import_obsidian6.Setting(containerEl).setName("Gap compression").setDesc("\u9577\u671F\u9593\u306E\u7A7A\u767D\u3092\u5727\u7E2E\u8868\u793A\u3059\u308B").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.gapCompression).onChange(async (value) => {
         this.plugin.settings.gapCompression = value;
