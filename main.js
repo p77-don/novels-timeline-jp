@@ -5345,140 +5345,263 @@ var NovelsTimelineSettingTab = class extends import_obsidian7.PluginSettingTab {
     super(app, plugin);
     this.plugin = plugin;
   }
+  // ----------------------------------------------------------
+  // control 定義は this.plugin.settings[key] を直接読み書きする。
+  // 保存後にタイムラインビューへ反映する必要があるため、書き込み経路
+  // だけを上書きし、保存直後に notifySettingsChanged() を呼ぶ。
+  // （control を使わない項目＝newEventFolder は render 側で個別に
+  //   saveSettings() のみ呼んでおり、この経路は通らない）
+  // ----------------------------------------------------------
+  async setControlValue(key, value) {
+    this.plugin.settings[key] = value;
+    await this.plugin.saveSettings();
+    this.plugin.notifySettingsChanged();
+  }
+  getSettingDefinitions() {
+    return [
+      // ========================================================
+      // General（先頭セクションのため見出しは付けない）
+      // ========================================================
+      {
+        name: "\u65B0\u898F\u30A4\u30D9\u30F3\u30C8\u306E\u4FDD\u5B58\u5148\u30D5\u30A9\u30EB\u30C0",
+        desc: "\u53F3\u30AF\u30EA\u30C3\u30AF\u3067\u4F5C\u6210\u3059\u308B\u30A4\u30D9\u30F3\u30C8\u30CE\u30FC\u30C8\u306E\u4FDD\u5B58\u5148\uFF08\u7A7A\u306E\u5834\u5408\u306F Vault \u30EB\u30FC\u30C8\uFF09",
+        render: (setting) => {
+          setting.addText(
+            (text) => text.setPlaceholder("\u4F8B: events / stories/chapter1").setValue(this.plugin.settings.newEventFolder).onChange(async (value) => {
+              const trimmed = value.trim();
+              this.plugin.settings.newEventFolder = trimmed ? (0, import_obsidian7.normalizePath)(trimmed) : "";
+              await this.plugin.saveSettings();
+            })
+          );
+        }
+      },
+      {
+        name: "Excluded folders",
+        desc: "\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u63A2\u7D22\u304B\u3089\u9664\u5916\u3059\u308B\u30D5\u30A9\u30EB\u30C0\uFF08\u30AB\u30F3\u30DE\u533A\u5207\u308A\uFF09",
+        render: (setting) => {
+          setting.addText(
+            (text) => text.setPlaceholder("Templates, Archive, Trash").setValue(this.plugin.settings.excludedFolders.join(", ")).onChange(async (value) => {
+              this.plugin.settings.excludedFolders = value.split(",").map((s) => s.trim()).filter((s) => s !== "").map((s) => (0, import_obsidian7.normalizePath)(s));
+              await this.plugin.saveSettings();
+              this.plugin.notifySettingsChanged();
+            })
+          );
+        }
+      },
+      // ========================================================
+      // Display
+      // ========================================================
+      {
+        type: "group",
+        heading: "Display",
+        items: [
+          {
+            name: "Board zoom",
+            desc: `\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u30DC\u30FC\u30C9\u306E\u62E1\u5927\u7387\uFF08${BOARD_ZOOM_MIN}\u301C${BOARD_ZOOM_MAX}%\uFF09\u3002\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u4E0A\u3067 Shift+\u30DB\u30A4\u30FC\u30EB\u3067\u3082\u5909\u66F4\u3067\u304D\u307E\u3059\u3002`,
+            render: (setting) => {
+              setting.addSlider(
+                (slider) => slider.setLimits(BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, 10).setValue(this.plugin.settings.boardZoom).setDynamicTooltip().onChange(async (value) => {
+                  this.plugin.settings.boardZoom = value;
+                  await this.plugin.saveSettings();
+                  this.plugin.notifySettingsChanged();
+                })
+              ).addExtraButton(
+                (btn) => btn.setIcon("reset").setTooltip(`${BOARD_ZOOM_DEFAULT}%\u306B\u623B\u3059`).onClick(async () => {
+                  this.plugin.settings.boardZoom = BOARD_ZOOM_DEFAULT;
+                  await this.plugin.saveSettings();
+                  this.plugin.notifySettingsChanged();
+                  this.update();
+                })
+              );
+            }
+          },
+          {
+            name: "\u914D\u8272\u30BB\u30C3\u30C8",
+            desc: "\u30A4\u30D9\u30F3\u30C8\u4F5C\u6210\u30FB\u7DE8\u96C6\u6642\u306B\u9078\u3079\u308B\u300C\u30CE\u30FC\u30C9\u8272\uFF0B\u6587\u5B57\u8272\u300D\u306E\u7D44\u307F\u5408\u308F\u305B\u3092\u7BA1\u7406\u3057\u307E\u3059\u3002",
+            action: () => {
+              new ColorPresetModal(this.app, this.plugin.colorPresetStore, () => {
+              }).open();
+            }
+          }
+        ]
+      },
+      // ========================================================
+      // Relation
+      // ========================================================
+      {
+        type: "group",
+        heading: "Relation",
+        items: [
+          {
+            name: "Relation color",
+            desc: "\u95A2\u4FC2\u7DDA\u306E\u8272",
+            control: { type: "color", key: "relationColor" }
+          },
+          {
+            name: "Relation style",
+            control: {
+              type: "dropdown",
+              key: "relationStyle",
+              options: { solid: "Solid", dashed: "Dashed", dotted: "Dotted" }
+            }
+          },
+          {
+            name: "Relation width",
+            desc: "\u95A2\u4FC2\u7DDA\u306E\u592A\u3055\uFF081\u301C6px\uFF09",
+            control: { type: "slider", key: "relationWidth", min: 1, max: 6, step: 1 }
+          },
+          {
+            name: "Relation arrow style",
+            control: {
+              type: "dropdown",
+              key: "relationArrowStyle",
+              options: { none: "None", arrow: "Arrow", triangle: "Triangle" }
+            }
+          },
+          {
+            name: "Relation opacity",
+            desc: "\u900F\u660E\u5EA6\uFF0810\u301C100%\uFF09",
+            render: (setting) => {
+              setting.addSlider(
+                (slider) => slider.setLimits(10, 100, 5).setValue(Math.round(this.plugin.settings.relationOpacity * 100)).setDynamicTooltip().onChange(async (value) => {
+                  this.plugin.settings.relationOpacity = value / 100;
+                  await this.plugin.saveSettings();
+                  this.plugin.notifySettingsChanged();
+                })
+              );
+            }
+          },
+          {
+            name: "Relation curve strength",
+            desc: "\u30D9\u30B8\u30A7\u66F2\u7387\uFF080\u301C100\uFF09",
+            control: { type: "slider", key: "relationCurveStrength", min: 0, max: 100, step: 5 }
+          }
+        ]
+      },
+      // ========================================================
+      // Timeline
+      // ========================================================
+      {
+        type: "group",
+        heading: "Timeline",
+        items: [
+          {
+            name: "Lane count",
+            desc: `\u6642\u9593\u8EF8\u306E\u53F3\u5074\u306B\u4E26\u3079\u308B\u30EC\u30FC\u30F3\u5217\u306E\u6570\uFF08${LANE_COUNT_MIN}\u301C${LANE_COUNT_MAX}\uFF09\u3002\u65E2\u5B58\u30A4\u30D9\u30F3\u30C8\u306E\u30EC\u30FC\u30F3\u756A\u53F7\u304C\u3053\u306E\u5024\u3092\u8D85\u3048\u308B\u5834\u5408\u306F\u3001\u8868\u793A\u4E0A\u306F\u6700\u5927\u30EC\u30FC\u30F3\u306B\u4E38\u3081\u3066\u63CF\u753B\u3055\u308C\u307E\u3059\uFF08\u30CE\u30FC\u30C8\u5074\u306E\u5024\u306F\u5909\u66F4\u3055\u308C\u307E\u305B\u3093\uFF09\u3002`,
+            render: (setting) => {
+              setting.addSlider(
+                (slider) => slider.setLimits(LANE_COUNT_MIN, LANE_COUNT_MAX, LANE_COUNT_STEP).setValue(this.plugin.settings.laneCount).setDynamicTooltip().onChange(async (value) => {
+                  this.plugin.settings.laneCount = value;
+                  await this.plugin.saveSettings();
+                  this.plugin.notifySettingsChanged();
+                })
+              ).addExtraButton(
+                (btn) => btn.setIcon("reset").setTooltip(`${LANE_COUNT_DEFAULT}\u306B\u623B\u3059`).onClick(async () => {
+                  this.plugin.settings.laneCount = LANE_COUNT_DEFAULT;
+                  await this.plugin.saveSettings();
+                  this.plugin.notifySettingsChanged();
+                  this.update();
+                })
+              );
+            }
+          },
+          {
+            name: "Gap compression",
+            desc: "\u9577\u671F\u9593\u306E\u7A7A\u767D\u3092\u5727\u7E2E\u8868\u793A\u3059\u308B",
+            control: { type: "toggle", key: "gapCompression" }
+          },
+          {
+            name: "Gap threshold",
+            desc: `Gap\u751F\u6210\u6761\u4EF6\uFF08\u65E5\u6570\u76F8\u5F53\u5024\u3001${GAP_THRESHOLD_MIN}\u301C${GAP_THRESHOLD_MAX}\uFF09\u3002\u30A4\u30D9\u30F3\u30C8\u9593\u9694\u304C\u3053\u306E\u5024\u4EE5\u4E0A\u306E\u5834\u5408\u306BGap\u3068\u3057\u3066\u5727\u7E2E\u8868\u793A\u3059\u308B\u3002`,
+            render: (setting) => {
+              setting.addSlider(
+                (slider) => slider.setLimits(GAP_THRESHOLD_MIN, GAP_THRESHOLD_MAX, GAP_THRESHOLD_STEP).setValue(this.plugin.settings.gapThreshold).setDynamicTooltip().onChange(async (value) => {
+                  this.plugin.settings.gapThreshold = value;
+                  await this.plugin.saveSettings();
+                  this.plugin.notifySettingsChanged();
+                })
+              ).addExtraButton(
+                (btn) => btn.setIcon("reset").setTooltip(`${GAP_THRESHOLD_DEFAULT}\u306B\u623B\u3059`).onClick(async () => {
+                  this.plugin.settings.gapThreshold = GAP_THRESHOLD_DEFAULT;
+                  await this.plugin.saveSettings();
+                  this.plugin.notifySettingsChanged();
+                  this.update();
+                })
+              );
+            }
+          }
+        ]
+      },
+      // ========================================================
+      // Calendar（暦設定）
+      // 月の追加・削除・名前/日数編集は動的な表形式UIのため、
+      // 宣言型定義ではなく命令的なサブページ（SettingPage）として
+      // 実装する。ページ自体は getSettingDefinitions() に登録される
+      // ため、「Calendar（暦設定）」という名前・説明は検索対象になる。
+      // ========================================================
+      {
+        type: "page",
+        name: "Calendar\uFF08\u66A6\u8A2D\u5B9A\uFF09",
+        desc: "\u7269\u8A9E\u4E16\u754C\u306E\u66A6\uFF08\u6708\u6570\u30FB\u6708\u540D\u30FB\u5404\u6708\u306E\u65E5\u6570\uFF09\u3092\u8A2D\u5B9A\u3057\u307E\u3059\u3002",
+        page: () => new CalendarSettingsPage(this.plugin)
+      },
+      // ========================================================
+      // Advanced
+      // ========================================================
+      {
+        type: "group",
+        heading: "Advanced",
+        items: [
+          {
+            name: "Virtual rendering",
+            desc: "\u4EEE\u60F3\u63CF\u753B\uFF08\u8868\u793A\u7BC4\u56F2\u5916\u306E\u30CE\u30FC\u30C9\u3092\u63CF\u753B\u3057\u306A\u3044\uFF09",
+            control: { type: "toggle", key: "virtualRendering" }
+          },
+          {
+            name: "Render buffer",
+            desc: "\u5148\u8AAD\u307F\u63CF\u753B\u7BC4\u56F2\uFF08px\uFF09",
+            control: { type: "number", key: "renderBuffer", min: 0 }
+          },
+          {
+            name: "Rebuild cache",
+            desc: "\u30AD\u30E3\u30C3\u30B7\u30E5\u3092\u524A\u9664\u3057\u3066\u5168\u518D\u89E3\u6790\u3059\u308B",
+            action: async () => {
+              const view = this.plugin.getTimelineView();
+              if (view) {
+                await view.rebuildAll();
+                new import_obsidian7.Notice("\u30AD\u30E3\u30C3\u30B7\u30E5\u3092\u518D\u69CB\u7BC9\u3057\u307E\u3057\u305F");
+              } else {
+                new import_obsidian7.Notice("\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u30D3\u30E5\u30FC\u304C\u958B\u3044\u3066\u3044\u307E\u305B\u3093");
+              }
+            }
+          }
+        ]
+      }
+    ];
+  }
+};
+var CalendarSettingsPage = class extends import_obsidian7.SettingPage {
+  constructor(plugin) {
+    super();
+    this.plugin = plugin;
+    this.title = "Calendar\uFF08\u66A6\u8A2D\u5B9A\uFF09";
+  }
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian7.Setting(containerEl).setName("\u65B0\u898F\u30A4\u30D9\u30F3\u30C8\u306E\u4FDD\u5B58\u5148\u30D5\u30A9\u30EB\u30C0").setDesc("\u53F3\u30AF\u30EA\u30C3\u30AF\u3067\u4F5C\u6210\u3059\u308B\u30A4\u30D9\u30F3\u30C8\u30CE\u30FC\u30C8\u306E\u4FDD\u5B58\u5148\uFF08\u7A7A\u306E\u5834\u5408\u306F Vault \u30EB\u30FC\u30C8\uFF09").addText(
-      (text) => text.setPlaceholder("\u4F8B: events / stories/chapter1").setValue(this.plugin.settings.newEventFolder).onChange(async (value) => {
-        const trimmed = value.trim();
-        this.plugin.settings.newEventFolder = trimmed ? (0, import_obsidian7.normalizePath)(trimmed) : "";
-        await this.plugin.saveSettings();
-      })
-    );
-    new import_obsidian7.Setting(containerEl).setName("Excluded folders").setDesc("\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u63A2\u7D22\u304B\u3089\u9664\u5916\u3059\u308B\u30D5\u30A9\u30EB\u30C0\uFF08\u30AB\u30F3\u30DE\u533A\u5207\u308A\uFF09").addText(
-      (text) => text.setPlaceholder("Templates, Archive, Trash").setValue(this.plugin.settings.excludedFolders.join(", ")).onChange(async (value) => {
-        this.plugin.settings.excludedFolders = value.split(",").map((s) => s.trim()).filter((s) => s !== "").map((s) => (0, import_obsidian7.normalizePath)(s));
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    );
-    new import_obsidian7.Setting(containerEl).setName("Display").setHeading();
-    new import_obsidian7.Setting(containerEl).setName("Board zoom").setDesc(
-      `\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u30DC\u30FC\u30C9\u306E\u62E1\u5927\u7387\uFF08${BOARD_ZOOM_MIN}\u301C${BOARD_ZOOM_MAX}%\uFF09\u3002\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u4E0A\u3067 Shift+\u30DB\u30A4\u30FC\u30EB\u3067\u3082\u5909\u66F4\u3067\u304D\u307E\u3059\u3002`
-    ).addSlider(
-      (slider) => slider.setLimits(BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, 10).setValue(this.plugin.settings.boardZoom).setDynamicTooltip().onChange(async (value) => {
-        this.plugin.settings.boardZoom = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    ).addExtraButton(
-      (btn) => btn.setIcon("reset").setTooltip(`${BOARD_ZOOM_DEFAULT}%\u306B\u623B\u3059`).onClick(async () => {
-        this.plugin.settings.boardZoom = BOARD_ZOOM_DEFAULT;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-        this.display();
-      })
-    );
-    new import_obsidian7.Setting(containerEl).setName("\u914D\u8272\u30BB\u30C3\u30C8").setDesc("\u30A4\u30D9\u30F3\u30C8\u4F5C\u6210\u30FB\u7DE8\u96C6\u6642\u306B\u9078\u3079\u308B\u300C\u30CE\u30FC\u30C9\u8272\uFF0B\u6587\u5B57\u8272\u300D\u306E\u7D44\u307F\u5408\u308F\u305B\u3092\u7BA1\u7406\u3057\u307E\u3059\u3002").addButton(
-      (btn) => btn.setButtonText("\u914D\u8272\u30BB\u30C3\u30C8\u3092\u7BA1\u7406...").onClick(() => {
-        new ColorPresetModal(this.app, this.plugin.colorPresetStore, () => {
-        }).open();
-      })
-    );
-    new import_obsidian7.Setting(containerEl).setName("Relation").setHeading();
-    new import_obsidian7.Setting(containerEl).setName("Relation color").setDesc("\u95A2\u4FC2\u7DDA\u306E\u8272").addColorPicker(
-      (picker) => picker.setValue(this.plugin.settings.relationColor).onChange(async (value) => {
-        this.plugin.settings.relationColor = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    );
-    new import_obsidian7.Setting(containerEl).setName("Relation style").addDropdown(
-      (dd) => dd.addOption("solid", "Solid").addOption("dashed", "Dashed").addOption("dotted", "Dotted").setValue(this.plugin.settings.relationStyle).onChange(async (value) => {
-        this.plugin.settings.relationStyle = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    );
-    new import_obsidian7.Setting(containerEl).setName("Relation width").setDesc("\u95A2\u4FC2\u7DDA\u306E\u592A\u3055\uFF081\u301C6px\uFF09").addSlider(
-      (slider) => slider.setLimits(1, 6, 1).setValue(this.plugin.settings.relationWidth).setDynamicTooltip().onChange(async (value) => {
-        this.plugin.settings.relationWidth = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    );
-    new import_obsidian7.Setting(containerEl).setName("Relation arrow style").addDropdown(
-      (dd) => dd.addOption("none", "None").addOption("arrow", "Arrow").addOption("triangle", "Triangle").setValue(this.plugin.settings.relationArrowStyle).onChange(async (value) => {
-        this.plugin.settings.relationArrowStyle = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    );
-    new import_obsidian7.Setting(containerEl).setName("Relation opacity").setDesc("\u900F\u660E\u5EA6\uFF0810\u301C100%\uFF09").addSlider(
-      (slider) => slider.setLimits(10, 100, 5).setValue(Math.round(this.plugin.settings.relationOpacity * 100)).setDynamicTooltip().onChange(async (value) => {
-        this.plugin.settings.relationOpacity = value / 100;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    );
-    new import_obsidian7.Setting(containerEl).setName("Relation curve strength").setDesc("\u30D9\u30B8\u30A7\u66F2\u7387\uFF080\u301C100\uFF09").addSlider(
-      (slider) => slider.setLimits(0, 100, 5).setValue(this.plugin.settings.relationCurveStrength).setDynamicTooltip().onChange(async (value) => {
-        this.plugin.settings.relationCurveStrength = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    );
-    new import_obsidian7.Setting(containerEl).setName("Timeline").setHeading();
-    new import_obsidian7.Setting(containerEl).setName("Lane count").setDesc(
-      `\u6642\u9593\u8EF8\u306E\u53F3\u5074\u306B\u4E26\u3079\u308B\u30EC\u30FC\u30F3\u5217\u306E\u6570\uFF08${LANE_COUNT_MIN}\u301C${LANE_COUNT_MAX}\uFF09\u3002\u65E2\u5B58\u30A4\u30D9\u30F3\u30C8\u306E\u30EC\u30FC\u30F3\u756A\u53F7\u304C\u3053\u306E\u5024\u3092\u8D85\u3048\u308B\u5834\u5408\u306F\u3001\u8868\u793A\u4E0A\u306F\u6700\u5927\u30EC\u30FC\u30F3\u306B\u4E38\u3081\u3066\u63CF\u753B\u3055\u308C\u307E\u3059\uFF08\u30CE\u30FC\u30C8\u5074\u306E\u5024\u306F\u5909\u66F4\u3055\u308C\u307E\u305B\u3093\uFF09\u3002`
-    ).addSlider(
-      (slider) => slider.setLimits(LANE_COUNT_MIN, LANE_COUNT_MAX, LANE_COUNT_STEP).setValue(this.plugin.settings.laneCount).setDynamicTooltip().onChange(async (value) => {
-        this.plugin.settings.laneCount = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    ).addExtraButton(
-      (btn) => btn.setIcon("reset").setTooltip(`${LANE_COUNT_DEFAULT}\u306B\u623B\u3059`).onClick(async () => {
-        this.plugin.settings.laneCount = LANE_COUNT_DEFAULT;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-        this.display();
-      })
-    );
-    new import_obsidian7.Setting(containerEl).setName("Gap compression").setDesc("\u9577\u671F\u9593\u306E\u7A7A\u767D\u3092\u5727\u7E2E\u8868\u793A\u3059\u308B").addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.gapCompression).onChange(async (value) => {
-        this.plugin.settings.gapCompression = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    );
-    new import_obsidian7.Setting(containerEl).setName("Gap threshold").setDesc(`Gap\u751F\u6210\u6761\u4EF6\uFF08\u65E5\u6570\u76F8\u5F53\u5024\u3001${GAP_THRESHOLD_MIN}\u301C${GAP_THRESHOLD_MAX}\uFF09\u3002\u30A4\u30D9\u30F3\u30C8\u9593\u9694\u304C\u3053\u306E\u5024\u4EE5\u4E0A\u306E\u5834\u5408\u306BGap\u3068\u3057\u3066\u5727\u7E2E\u8868\u793A\u3059\u308B\u3002`).addSlider(
-      (slider) => slider.setLimits(GAP_THRESHOLD_MIN, GAP_THRESHOLD_MAX, GAP_THRESHOLD_STEP).setValue(this.plugin.settings.gapThreshold).setDynamicTooltip().onChange(async (value) => {
-        this.plugin.settings.gapThreshold = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    ).addExtraButton(
-      (btn) => btn.setIcon("reset").setTooltip(`${GAP_THRESHOLD_DEFAULT}\u306B\u623B\u3059`).onClick(async () => {
-        this.plugin.settings.gapThreshold = GAP_THRESHOLD_DEFAULT;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-        this.display();
-      })
-    );
-    new import_obsidian7.Setting(containerEl).setName("Calendar\uFF08\u66A6\u8A2D\u5B9A\uFF09").setHeading();
     containerEl.createEl("p", {
       text: "\u7269\u8A9E\u4E16\u754C\u306E\u66A6\u3092\u5B9A\u7FA9\u3057\u307E\u3059\u3002\u6708\u6570\u30FB\u6708\u540D\u30FB\u5404\u6708\u306E\u65E5\u6570\u3092\u8A2D\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
       cls: "setting-item-description"
     });
+    const calendar = this.plugin.settings.calendar;
     new import_obsidian7.Setting(containerEl).setName("\u66A6\u306E\u540D\u524D").setDesc("\u8868\u793A\u7528\uFF08\u4EFB\u610F\uFF09").addText(
-      (text) => text.setValue(this.plugin.settings.calendar.name).onChange(async (value) => {
+      (text) => text.setValue(calendar.name).onChange(async (value) => {
         this.plugin.settings.calendar.name = value;
         await this.plugin.saveSettings();
         this.plugin.notifySettingsChanged();
       })
     );
-    this.buildCalendarTable(containerEl);
+    this.buildCalendarTable(containerEl, calendar);
     new import_obsidian7.Setting(containerEl).setName("\u6708\u3092\u8FFD\u52A0").setDesc("\u66A6\u306B\u6708\u3092\u8FFD\u52A0\u3057\u307E\u3059").addButton(
       (btn) => btn.setButtonText("\uFF0B \u6708\u3092\u8FFD\u52A0").onClick(async () => {
         const months = this.plugin.settings.calendar.months;
@@ -5497,41 +5620,11 @@ var NovelsTimelineSettingTab = class extends import_obsidian7.PluginSettingTab {
         this.display();
       })
     );
-    new import_obsidian7.Setting(containerEl).setName("Advanced").setHeading();
-    new import_obsidian7.Setting(containerEl).setName("Virtual rendering").setDesc("\u4EEE\u60F3\u63CF\u753B\uFF08\u8868\u793A\u7BC4\u56F2\u5916\u306E\u30CE\u30FC\u30C9\u3092\u63CF\u753B\u3057\u306A\u3044\uFF09").addToggle(
-      (toggle) => toggle.setValue(this.plugin.settings.virtualRendering).onChange(async (value) => {
-        this.plugin.settings.virtualRendering = value;
-        await this.plugin.saveSettings();
-        this.plugin.notifySettingsChanged();
-      })
-    );
-    new import_obsidian7.Setting(containerEl).setName("Render buffer").setDesc("\u5148\u8AAD\u307F\u63CF\u753B\u7BC4\u56F2\uFF08px\uFF09").addText(
-      (text) => text.setValue(String(this.plugin.settings.renderBuffer)).onChange(async (value) => {
-        const n = parseInt(value, 10);
-        if (Number.isFinite(n) && n >= 0) {
-          this.plugin.settings.renderBuffer = n;
-          await this.plugin.saveSettings();
-          this.plugin.notifySettingsChanged();
-        }
-      })
-    );
-    new import_obsidian7.Setting(containerEl).setName("Rebuild cache").setDesc("\u30AD\u30E3\u30C3\u30B7\u30E5\u3092\u524A\u9664\u3057\u3066\u5168\u518D\u89E3\u6790\u3059\u308B").addButton(
-      (btn) => btn.setButtonText("\u518D\u69CB\u7BC9").onClick(async () => {
-        const view = this.plugin.getTimelineView();
-        if (view) {
-          await view.rebuildAll();
-          new import_obsidian7.Notice("\u30AD\u30E3\u30C3\u30B7\u30E5\u3092\u518D\u69CB\u7BC9\u3057\u307E\u3057\u305F");
-        } else {
-          new import_obsidian7.Notice("\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u30D3\u30E5\u30FC\u304C\u958B\u3044\u3066\u3044\u307E\u305B\u3093");
-        }
-      })
-    );
   }
   // ----------------------------------------------------------
-  // 暦テーブルUI（C. の暦設定）
+  // 暦テーブルUI
   // ----------------------------------------------------------
-  buildCalendarTable(containerEl) {
-    const calendar = this.plugin.settings.calendar;
+  buildCalendarTable(containerEl, calendar) {
     const tableWrapper = containerEl.createDiv({ cls: "ntj-calendar-table" });
     const table = tableWrapper.createEl("table");
     const thead = table.createEl("thead");

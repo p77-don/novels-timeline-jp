@@ -1,12 +1,38 @@
 // ============================================================
 // SettingsTab.ts
 // Novels Timeline JP — 設定画面
+//
+// Obsidian 1.13.0 以降の宣言型設定API（getSettingDefinitions）に
+// 準拠する。display() は使用しない（本プラグインの minAppVersion は
+// 既に 1.13.0 であるため、旧API向けフォールバックは不要）。
+// これにより、設定項目が Obsidian の設定検索に表示されるようになる。
 // ============================================================
 
-import { App, PluginSettingTab, Setting, Notice, normalizePath } from "obsidian";
+import {
+  App,
+  PluginSettingTab,
+  Setting,
+  SettingPage,
+  SettingDefinitionItem,
+  Notice,
+  normalizePath,
+} from "obsidian";
 import type NovelsTimelinePlugin from "../main";
 import { CalendarMonth, CalendarSettings } from "../types/TimelineTypes";
-import { DEFAULT_CALENDAR, BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, BOARD_ZOOM_DEFAULT, GAP_THRESHOLD_MIN, GAP_THRESHOLD_MAX, GAP_THRESHOLD_DEFAULT, GAP_THRESHOLD_STEP, LANE_COUNT_MIN, LANE_COUNT_MAX, LANE_COUNT_DEFAULT, LANE_COUNT_STEP } from "./PluginSettings";
+import {
+  DEFAULT_CALENDAR,
+  BOARD_ZOOM_MIN,
+  BOARD_ZOOM_MAX,
+  BOARD_ZOOM_DEFAULT,
+  GAP_THRESHOLD_MIN,
+  GAP_THRESHOLD_MAX,
+  GAP_THRESHOLD_DEFAULT,
+  GAP_THRESHOLD_STEP,
+  LANE_COUNT_MIN,
+  LANE_COUNT_MAX,
+  LANE_COUNT_DEFAULT,
+  LANE_COUNT_STEP,
+} from "./PluginSettings";
 import { ColorPresetModal } from "../view/ColorPresetModal";
 
 export class NovelsTimelineSettingTab extends PluginSettingTab {
@@ -17,268 +43,321 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
+  // ----------------------------------------------------------
+  // control 定義は this.plugin.settings[key] を直接読み書きする。
+  // 保存後にタイムラインビューへ反映する必要があるため、書き込み経路
+  // だけを上書きし、保存直後に notifySettingsChanged() を呼ぶ。
+  // （control を使わない項目＝newEventFolder は render 側で個別に
+  //   saveSettings() のみ呼んでおり、この経路は通らない）
+  // ----------------------------------------------------------
+  async setControlValue(key: string, value: unknown): Promise<void> {
+    (this.plugin.settings as unknown as Record<string, unknown>)[key] = value;
+    await this.plugin.saveSettings();
+    this.plugin.notifySettingsChanged();
+  }
+
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    return [
+      // ========================================================
+      // General（先頭セクションのため見出しは付けない）
+      // ========================================================
+      {
+        name: "新規イベントの保存先フォルダ",
+        desc: "右クリックで作成するイベントノートの保存先（空の場合は Vault ルート）",
+        render: (setting) => {
+          setting.addText((text) =>
+            text
+              .setPlaceholder("例: events / stories/chapter1")
+              .setValue(this.plugin.settings.newEventFolder)
+              .onChange(async (value) => {
+                const trimmed = value.trim();
+                this.plugin.settings.newEventFolder = trimmed ? normalizePath(trimmed) : "";
+                await this.plugin.saveSettings();
+              })
+          );
+        },
+      },
+      {
+        name: "Excluded folders",
+        desc: "タイムライン探索から除外するフォルダ（カンマ区切り）",
+        render: (setting) => {
+          setting.addText((text) =>
+            text
+              .setPlaceholder("Templates, Archive, Trash")
+              .setValue(this.plugin.settings.excludedFolders.join(", "))
+              .onChange(async (value) => {
+                this.plugin.settings.excludedFolders = value
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter((s) => s !== "")
+                  .map((s) => normalizePath(s));
+                await this.plugin.saveSettings();
+                this.plugin.notifySettingsChanged();
+              })
+          );
+        },
+      },
+
+      // ========================================================
+      // Display
+      // ========================================================
+      {
+        type: "group",
+        heading: "Display",
+        items: [
+          {
+            name: "Board zoom",
+            desc:
+              `タイムラインボードの拡大率（${BOARD_ZOOM_MIN}〜${BOARD_ZOOM_MAX}%）。` +
+              "タイムライン上で Shift+ホイールでも変更できます。",
+            render: (setting) => {
+              setting
+                .addSlider((slider) =>
+                  slider
+                    .setLimits(BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, 10)
+                    .setValue(this.plugin.settings.boardZoom)
+                    .setDynamicTooltip()
+                    .onChange(async (value) => {
+                      this.plugin.settings.boardZoom = value;
+                      await this.plugin.saveSettings();
+                      this.plugin.notifySettingsChanged();
+                    })
+                )
+                .addExtraButton((btn) =>
+                  btn
+                    .setIcon("reset")
+                    .setTooltip(`${BOARD_ZOOM_DEFAULT}%に戻す`)
+                    .onClick(async () => {
+                      this.plugin.settings.boardZoom = BOARD_ZOOM_DEFAULT;
+                      await this.plugin.saveSettings();
+                      this.plugin.notifySettingsChanged();
+                      this.update();
+                    })
+                );
+            },
+          },
+          {
+            name: "配色セット",
+            desc: "イベント作成・編集時に選べる「ノード色＋文字色」の組み合わせを管理します。",
+            action: () => {
+              new ColorPresetModal(this.app, this.plugin.colorPresetStore, () => {
+                /* サイドバーは開かれるたびに最新の配色セットを読み込むため、
+                   ここでは特に何もしなくてよい。 */
+              }).open();
+            },
+          },
+        ],
+      },
+
+      // ========================================================
+      // Relation
+      // ========================================================
+      {
+        type: "group",
+        heading: "Relation",
+        items: [
+          {
+            name: "Relation color",
+            desc: "関係線の色",
+            control: { type: "color", key: "relationColor" },
+          },
+          {
+            name: "Relation style",
+            control: {
+              type: "dropdown",
+              key: "relationStyle",
+              options: { solid: "Solid", dashed: "Dashed", dotted: "Dotted" },
+            },
+          },
+          {
+            name: "Relation width",
+            desc: "関係線の太さ（1〜6px）",
+            control: { type: "slider", key: "relationWidth", min: 1, max: 6, step: 1 },
+          },
+          {
+            name: "Relation arrow style",
+            control: {
+              type: "dropdown",
+              key: "relationArrowStyle",
+              options: { none: "None", arrow: "Arrow", triangle: "Triangle" },
+            },
+          },
+          {
+            name: "Relation opacity",
+            desc: "透明度（10〜100%）",
+            render: (setting) => {
+              setting.addSlider((slider) =>
+                slider
+                  .setLimits(10, 100, 5)
+                  .setValue(Math.round(this.plugin.settings.relationOpacity * 100))
+                  .setDynamicTooltip()
+                  .onChange(async (value) => {
+                    this.plugin.settings.relationOpacity = value / 100;
+                    await this.plugin.saveSettings();
+                    this.plugin.notifySettingsChanged();
+                  })
+              );
+            },
+          },
+          {
+            name: "Relation curve strength",
+            desc: "ベジェ曲率（0〜100）",
+            control: { type: "slider", key: "relationCurveStrength", min: 0, max: 100, step: 5 },
+          },
+        ],
+      },
+
+      // ========================================================
+      // Timeline
+      // ========================================================
+      {
+        type: "group",
+        heading: "Timeline",
+        items: [
+          {
+            name: "Lane count",
+            desc:
+              `時間軸の右側に並べるレーン列の数（${LANE_COUNT_MIN}〜${LANE_COUNT_MAX}）。` +
+              "既存イベントのレーン番号がこの値を超える場合は、表示上は最大レーンに丸めて描画されます（ノート側の値は変更されません）。",
+            render: (setting) => {
+              setting
+                .addSlider((slider) =>
+                  slider
+                    .setLimits(LANE_COUNT_MIN, LANE_COUNT_MAX, LANE_COUNT_STEP)
+                    .setValue(this.plugin.settings.laneCount)
+                    .setDynamicTooltip()
+                    .onChange(async (value) => {
+                      this.plugin.settings.laneCount = value;
+                      await this.plugin.saveSettings();
+                      this.plugin.notifySettingsChanged();
+                    })
+                )
+                .addExtraButton((btn) =>
+                  btn
+                    .setIcon("reset")
+                    .setTooltip(`${LANE_COUNT_DEFAULT}に戻す`)
+                    .onClick(async () => {
+                      this.plugin.settings.laneCount = LANE_COUNT_DEFAULT;
+                      await this.plugin.saveSettings();
+                      this.plugin.notifySettingsChanged();
+                      this.update();
+                    })
+                );
+            },
+          },
+          {
+            name: "Gap compression",
+            desc: "長期間の空白を圧縮表示する",
+            control: { type: "toggle", key: "gapCompression" },
+          },
+          {
+            name: "Gap threshold",
+            desc: `Gap生成条件（日数相当値、${GAP_THRESHOLD_MIN}〜${GAP_THRESHOLD_MAX}）。イベント間隔がこの値以上の場合にGapとして圧縮表示する。`,
+            render: (setting) => {
+              setting
+                .addSlider((slider) =>
+                  slider
+                    .setLimits(GAP_THRESHOLD_MIN, GAP_THRESHOLD_MAX, GAP_THRESHOLD_STEP)
+                    .setValue(this.plugin.settings.gapThreshold)
+                    .setDynamicTooltip()
+                    .onChange(async (value) => {
+                      this.plugin.settings.gapThreshold = value;
+                      await this.plugin.saveSettings();
+                      this.plugin.notifySettingsChanged();
+                    })
+                )
+                .addExtraButton((btn) =>
+                  btn
+                    .setIcon("reset")
+                    .setTooltip(`${GAP_THRESHOLD_DEFAULT}に戻す`)
+                    .onClick(async () => {
+                      this.plugin.settings.gapThreshold = GAP_THRESHOLD_DEFAULT;
+                      await this.plugin.saveSettings();
+                      this.plugin.notifySettingsChanged();
+                      this.update();
+                    })
+                );
+            },
+          },
+        ],
+      },
+
+      // ========================================================
+      // Calendar（暦設定）
+      // 月の追加・削除・名前/日数編集は動的な表形式UIのため、
+      // 宣言型定義ではなく命令的なサブページ（SettingPage）として
+      // 実装する。ページ自体は getSettingDefinitions() に登録される
+      // ため、「Calendar（暦設定）」という名前・説明は検索対象になる。
+      // ========================================================
+      {
+        type: "page",
+        name: "Calendar（暦設定）",
+        desc: "物語世界の暦（月数・月名・各月の日数）を設定します。",
+        page: () => new CalendarSettingsPage(this.plugin),
+      },
+
+      // ========================================================
+      // Advanced
+      // ========================================================
+      {
+        type: "group",
+        heading: "Advanced",
+        items: [
+          {
+            name: "Virtual rendering",
+            desc: "仮想描画（表示範囲外のノードを描画しない）",
+            control: { type: "toggle", key: "virtualRendering" },
+          },
+          {
+            name: "Render buffer",
+            desc: "先読み描画範囲（px）",
+            control: { type: "number", key: "renderBuffer", min: 0 },
+          },
+          {
+            name: "Rebuild cache",
+            desc: "キャッシュを削除して全再解析する",
+            action: async () => {
+              const view = this.plugin.getTimelineView();
+              if (view) {
+                await view.rebuildAll();
+                new Notice("キャッシュを再構築しました");
+              } else {
+                new Notice("タイムラインビューが開いていません");
+              }
+            },
+          },
+        ],
+      },
+    ];
+  }
+}
+
+// ================================================================
+// Calendar（暦設定）サブページ
+//
+// 月テーブルは行の追加・削除・複数フィールド編集を伴う動的UIであり、
+// 宣言型 control / list の1行1コントロール前提では表現しづらいため、
+// 公式ガイドの推奨（"Reach for the imperative form only when this
+// can't express what you need"）に従い、SettingPage を用いた命令的
+// 実装のままとする。
+// ================================================================
+
+class CalendarSettingsPage extends SettingPage {
+  constructor(private plugin: NovelsTimelinePlugin) {
+    super();
+    this.title = "Calendar（暦設定）";
+  }
+
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
 
-    // ========================================================
-    // General（先頭セクションのため見出しは付けない）
-    // ========================================================
-
-    new Setting(containerEl)
-      .setName("新規イベントの保存先フォルダ")
-      .setDesc("右クリックで作成するイベントノートの保存先（空の場合は Vault ルート）")
-      .addText((text) =>
-        text
-          .setPlaceholder("例: events / stories/chapter1")
-          .setValue(this.plugin.settings.newEventFolder)
-          .onChange(async (value) => {
-            const trimmed = value.trim();
-            this.plugin.settings.newEventFolder = trimmed ? normalizePath(trimmed) : "";
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Excluded folders")
-      .setDesc("タイムライン探索から除外するフォルダ（カンマ区切り）")
-      .addText((text) =>
-        text
-          .setPlaceholder("Templates, Archive, Trash")
-          .setValue(this.plugin.settings.excludedFolders.join(", "))
-          .onChange(async (value) => {
-            this.plugin.settings.excludedFolders = value
-              .split(",")
-              .map((s) => s.trim())
-              .filter((s) => s !== "")
-              .map((s) => normalizePath(s));
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      );
-
-    // ========================================================
-    // Display
-    // ========================================================
-    new Setting(containerEl).setName("Display").setHeading();
-
-    new Setting(containerEl)
-      .setName("Board zoom")
-      .setDesc(
-        `タイムラインボードの拡大率（${BOARD_ZOOM_MIN}〜${BOARD_ZOOM_MAX}%）。` +
-        "タイムライン上で Shift+ホイールでも変更できます。"
-      )
-      .addSlider((slider) =>
-        slider
-          .setLimits(BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, 10)
-          .setValue(this.plugin.settings.boardZoom)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.boardZoom = value;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      )
-      .addExtraButton((btn) =>
-        btn
-          .setIcon("reset")
-          .setTooltip(`${BOARD_ZOOM_DEFAULT}%に戻す`)
-          .onClick(async () => {
-            this.plugin.settings.boardZoom = BOARD_ZOOM_DEFAULT;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-            this.display();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("配色セット")
-      .setDesc("イベント作成・編集時に選べる「ノード色＋文字色」の組み合わせを管理します。")
-      .addButton((btn) =>
-        btn
-          .setButtonText("配色セットを管理...")
-          .onClick(() => {
-            new ColorPresetModal(this.app, this.plugin.colorPresetStore, () => {
-              /* サイドバーは開かれるたびに最新の配色セットを読み込むため、
-                 ここでは特に何もしなくてよい。 */
-            }).open();
-          })
-      );
-
-    // ========================================================
-    // Relation
-    // ========================================================
-    new Setting(containerEl).setName("Relation").setHeading();
-
-    new Setting(containerEl)
-      .setName("Relation color")
-      .setDesc("関係線の色")
-      .addColorPicker((picker) =>
-        picker
-          .setValue(this.plugin.settings.relationColor)
-          .onChange(async (value) => {
-            this.plugin.settings.relationColor = value;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Relation style")
-      .addDropdown((dd) =>
-        dd
-          .addOption("solid",  "Solid")
-          .addOption("dashed", "Dashed")
-          .addOption("dotted", "Dotted")
-          .setValue(this.plugin.settings.relationStyle)
-          .onChange(async (value) => {
-            this.plugin.settings.relationStyle = value as "solid" | "dashed" | "dotted";
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Relation width")
-      .setDesc("関係線の太さ（1〜6px）")
-      .addSlider((slider) =>
-        slider
-          .setLimits(1, 6, 1)
-          .setValue(this.plugin.settings.relationWidth)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.relationWidth = value;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Relation arrow style")
-      .addDropdown((dd) =>
-        dd
-          .addOption("none",     "None")
-          .addOption("arrow",    "Arrow")
-          .addOption("triangle", "Triangle")
-          .setValue(this.plugin.settings.relationArrowStyle)
-          .onChange(async (value) => {
-            this.plugin.settings.relationArrowStyle = value as "none" | "arrow" | "triangle";
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Relation opacity")
-      .setDesc("透明度（10〜100%）")
-      .addSlider((slider) =>
-        slider
-          .setLimits(10, 100, 5)
-          .setValue(Math.round(this.plugin.settings.relationOpacity * 100))
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.relationOpacity = value / 100;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Relation curve strength")
-      .setDesc("ベジェ曲率（0〜100）")
-      .addSlider((slider) =>
-        slider
-          .setLimits(0, 100, 5)
-          .setValue(this.plugin.settings.relationCurveStrength)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.relationCurveStrength = value;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      );
-
-    // ========================================================
-    // Timeline
-    // ========================================================
-    new Setting(containerEl).setName("Timeline").setHeading();
-
-    new Setting(containerEl)
-      .setName("Lane count")
-      .setDesc(
-        `時間軸の右側に並べるレーン列の数（${LANE_COUNT_MIN}〜${LANE_COUNT_MAX}）。` +
-        "既存イベントのレーン番号がこの値を超える場合は、表示上は最大レーンに丸めて描画されます（ノート側の値は変更されません）。"
-      )
-      .addSlider((slider) =>
-        slider
-          .setLimits(LANE_COUNT_MIN, LANE_COUNT_MAX, LANE_COUNT_STEP)
-          .setValue(this.plugin.settings.laneCount)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.laneCount = value;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      )
-      .addExtraButton((btn) =>
-        btn
-          .setIcon("reset")
-          .setTooltip(`${LANE_COUNT_DEFAULT}に戻す`)
-          .onClick(async () => {
-            this.plugin.settings.laneCount = LANE_COUNT_DEFAULT;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-            this.display();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Gap compression")
-      .setDesc("長期間の空白を圧縮表示する")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.gapCompression)
-          .onChange(async (value) => {
-            this.plugin.settings.gapCompression = value;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Gap threshold")
-      .setDesc(`Gap生成条件（日数相当値、${GAP_THRESHOLD_MIN}〜${GAP_THRESHOLD_MAX}）。イベント間隔がこの値以上の場合にGapとして圧縮表示する。`)
-      .addSlider((slider) =>
-        slider
-          .setLimits(GAP_THRESHOLD_MIN, GAP_THRESHOLD_MAX, GAP_THRESHOLD_STEP)
-          .setValue(this.plugin.settings.gapThreshold)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.gapThreshold = value;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      )
-      .addExtraButton((btn) =>
-        btn
-          .setIcon("reset")
-          .setTooltip(`${GAP_THRESHOLD_DEFAULT}に戻す`)
-          .onClick(async () => {
-            this.plugin.settings.gapThreshold = GAP_THRESHOLD_DEFAULT;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-            this.display();
-          })
-      );
-
-    // ========================================================
-    // Calendar（暦設定）
-    // ========================================================
-    new Setting(containerEl).setName("Calendar（暦設定）").setHeading();
     containerEl.createEl("p", {
       text: "物語世界の暦を定義します。月数・月名・各月の日数を設定してください。",
       cls: "setting-item-description",
     });
+
+    const calendar: CalendarSettings = this.plugin.settings.calendar;
 
     // 暦名
     new Setting(containerEl)
@@ -286,7 +365,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
       .setDesc("表示用（任意）")
       .addText((text) =>
         text
-          .setValue(this.plugin.settings.calendar.name)
+          .setValue(calendar.name)
           .onChange(async (value) => {
             this.plugin.settings.calendar.name = value;
             await this.plugin.saveSettings();
@@ -295,7 +374,7 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
       );
 
     // 月テーブル
-    this.buildCalendarTable(containerEl);
+    this.buildCalendarTable(containerEl, calendar);
 
     // 月を追加ボタン
     new Setting(containerEl)
@@ -327,64 +406,13 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
             this.display();
           })
       );
-
-    // ========================================================
-    // Advanced
-    // ========================================================
-    new Setting(containerEl).setName("Advanced").setHeading();
-
-    new Setting(containerEl)
-      .setName("Virtual rendering")
-      .setDesc("仮想描画（表示範囲外のノードを描画しない）")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.virtualRendering)
-          .onChange(async (value) => {
-            this.plugin.settings.virtualRendering = value;
-            await this.plugin.saveSettings();
-            this.plugin.notifySettingsChanged();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Render buffer")
-      .setDesc("先読み描画範囲（px）")
-      .addText((text) =>
-        text
-          .setValue(String(this.plugin.settings.renderBuffer))
-          .onChange(async (value) => {
-            const n = parseInt(value, 10);
-            if (Number.isFinite(n) && n >= 0) {
-              this.plugin.settings.renderBuffer = n;
-              await this.plugin.saveSettings();
-              this.plugin.notifySettingsChanged();
-            }
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Rebuild cache")
-      .setDesc("キャッシュを削除して全再解析する")
-      .addButton((btn) =>
-        btn.setButtonText("再構築").onClick(async () => {
-          const view = this.plugin.getTimelineView();
-          if (view) {
-            await view.rebuildAll();
-            new Notice("キャッシュを再構築しました");
-          } else {
-            new Notice("タイムラインビューが開いていません");
-          }
-        })
-      );
   }
 
   // ----------------------------------------------------------
-  // 暦テーブルUI（C. の暦設定）
+  // 暦テーブルUI
   // ----------------------------------------------------------
 
-  private buildCalendarTable(containerEl: HTMLElement): void {
-    const calendar: CalendarSettings = this.plugin.settings.calendar;
-
+  private buildCalendarTable(containerEl: HTMLElement, calendar: CalendarSettings): void {
     const tableWrapper = containerEl.createDiv({ cls: "ntj-calendar-table" });
     const table = tableWrapper.createEl("table");
 
