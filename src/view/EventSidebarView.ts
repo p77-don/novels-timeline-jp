@@ -15,6 +15,7 @@ import { TimelineEvent, ColorPreset } from "../types/TimelineTypes";
 import { DateParser } from "../parser/DateParser";
 import { NTJP_KEYS } from "../parser/TimelineParser";
 import { ColorPresetModal } from "./ColorPresetModal";
+import { ConfirmModal } from "./ConfirmModal";
 
 export const EVENT_SIDEBAR_VIEW_TYPE = "novels-timeline-jp-sidebar";
 
@@ -608,8 +609,14 @@ export class EventSidebarView extends ItemView {
   // ----------------------------------------------------------
 
   private async confirmDelete(event: TimelineEvent): Promise<void> {
-    const confirmed = confirm(
-      `「${event.displayTitle}」を削除しますか？\nこの操作は取り消せません。`);
+    // window.confirm() は使わない（Electron でダイアログを閉じた後に
+    // フォーカスが戻らず、クリックしてもキャレットが表示されなくなる
+    // 不具合の原因になるため）。詳細は ConfirmModal.ts のコメント参照。
+    const confirmed = await ConfirmModal.confirm(
+      this.plugin.app,
+      `「${event.displayTitle}」を削除しますか？\nこの操作は取り消せません。`,
+      { title: "イベントの削除", confirmText: "削除", danger: true }
+    );
     if (!confirmed) return;
     const file = this.plugin.app.vault.getFileByPath(event.filePath);
     if (!file) { new Notice("ファイルが見つかりません"); return; }

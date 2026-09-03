@@ -6,6 +6,7 @@
 import { App, Modal, Notice, Setting } from "obsidian";
 import { ColorPreset } from "../types/TimelineTypes";
 import { ColorPresetStore } from "../store/ColorPresetStore";
+import { ConfirmModal } from "./ConfirmModal";
 
 const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
 
@@ -88,7 +89,15 @@ export class ColorPresetModal extends Modal {
 
     const delBtn = btnRow.createEl("button", { cls: "ntj-sf-btn ntj-sf-btn-danger", text: "削除" });
     delBtn.addEventListener("click", async () => {
-      if (!confirm(`「${preset.name}」を削除しますか？`)) return;
+      // window.confirm() は使わない（Electron でダイアログを閉じた後に
+      // フォーカスが戻らず、クリックしてもキャレットが表示されなくなる
+      // 不具合の原因になるため）。詳細は ConfirmModal.ts のコメント参照。
+      const confirmed = await ConfirmModal.confirm(
+        this.app,
+        `「${preset.name}」を削除しますか？`,
+        { title: "配色セットの削除", confirmText: "削除", danger: true }
+      );
+      if (!confirmed) return;
       this.store.remove(preset.id);
       await this.store.save();
       this.dirty = true;
