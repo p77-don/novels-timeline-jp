@@ -5674,7 +5674,7 @@ var CalendarSettingsPage = class extends import_obsidian8.SettingPage {
       })
     );
     new import_obsidian8.Setting(containerEl).setName("\u30C7\u30D5\u30A9\u30EB\u30C8\u66A6\u306B\u623B\u3059").setDesc("\u66A6\u540D\u3092\u300C\u897F\u66A6\u300D\u3001\u6708\u540D\u3092\u672A\u8A2D\u5B9A\u306B\u30EA\u30BB\u30C3\u30C8\u3057\u307E\u3059").addButton(
-      (btn) => btn.setButtonText("\u30EA\u30BB\u30C3\u30C8").setWarning().onClick(async () => {
+      (btn) => btn.setButtonText("\u30EA\u30BB\u30C3\u30C8").setDestructive().onClick(async () => {
         this.plugin.settings.calendar = JSON.parse(JSON.stringify(DEFAULT_CALENDAR));
         await this.plugin.saveSettings();
         this.plugin.notifySettingsChanged();

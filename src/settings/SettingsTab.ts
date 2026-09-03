@@ -398,7 +398,7 @@ class CalendarSettingsPage extends SettingPage {
       .addButton((btn) =>
         btn
           .setButtonText("リセット")
-          .setWarning()
+          .setDestructive()
           .onClick(async () => {
             this.plugin.settings.calendar = JSON.parse(JSON.stringify(DEFAULT_CALENDAR));
             await this.plugin.saveSettings();
