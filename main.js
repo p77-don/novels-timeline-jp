@@ -58,6 +58,10 @@ var LANE_COUNT_MIN = 1;
 var LANE_COUNT_MAX = 20;
 var LANE_COUNT_DEFAULT = 10;
 var LANE_COUNT_STEP = 1;
+var RELATION_WIDTH_MIN = 1;
+var RELATION_WIDTH_MAX = 6;
+var RENDER_BUFFER_MIN = 0;
+var RENDER_BUFFER_MAX = 2e4;
 var DEFAULT_SETTINGS = {
   newEventFolder: "",
   excludedFolders: [],
@@ -90,6 +94,68 @@ function calcCumulativeDaysBeforeMonth(calendar, monthNum) {
 }
 function getMonthDef(calendar, monthNum) {
   return calendar.months.find((m) => m.month === monthNum);
+}
+function cloneDefaultCalendar() {
+  return JSON.parse(JSON.stringify(DEFAULT_CALENDAR));
+}
+function clampNumber(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+function pickEnum(value, allowed, fallback) {
+  return typeof value === "string" && allowed.includes(value) ? value : fallback;
+}
+var HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
+function sanitizeHexColor(value, fallback) {
+  return typeof value === "string" && HEX_COLOR_RE.test(value) ? value : fallback;
+}
+function sanitizeStringArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v) => typeof v === "string");
+}
+function sanitizeCalendarMonth(raw, monthNumber) {
+  const obj = raw && typeof raw === "object" ? raw : {};
+  const name = typeof obj.name === "string" ? obj.name : "";
+  const daysNum = Number(obj.days);
+  const days = Number.isFinite(daysNum) && daysNum >= 1 ? Math.floor(daysNum) : 30;
+  return { month: monthNumber, name, days };
+}
+function sanitizeCalendar(raw) {
+  if (!raw || typeof raw !== "object") {
+    return cloneDefaultCalendar();
+  }
+  const obj = raw;
+  const name = typeof obj.name === "string" ? obj.name : DEFAULT_CALENDAR.name;
+  const monthsRaw = Array.isArray(obj.months) ? obj.months : [];
+  const months = monthsRaw.map((m, i) => sanitizeCalendarMonth(m, i + 1));
+  if (months.length === 0) {
+    return cloneDefaultCalendar();
+  }
+  return { name, months };
+}
+function sanitizeSettings(raw) {
+  const obj = raw && typeof raw === "object" ? raw : {};
+  const d = DEFAULT_SETTINGS;
+  return {
+    newEventFolder: typeof obj.newEventFolder === "string" ? obj.newEventFolder : d.newEventFolder,
+    excludedFolders: sanitizeStringArray(obj.excludedFolders),
+    boardZoom: clampNumber(obj.boardZoom, BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, d.boardZoom),
+    gapCompression: typeof obj.gapCompression === "boolean" ? obj.gapCompression : d.gapCompression,
+    gapThreshold: clampNumber(obj.gapThreshold, GAP_THRESHOLD_MIN, GAP_THRESHOLD_MAX, d.gapThreshold),
+    laneCount: clampNumber(obj.laneCount, LANE_COUNT_MIN, LANE_COUNT_MAX, d.laneCount),
+    calendar: sanitizeCalendar(obj.calendar),
+    relationColor: sanitizeHexColor(obj.relationColor, d.relationColor),
+    relationStyle: pickEnum(obj.relationStyle, ["solid", "dashed", "dotted"], d.relationStyle),
+    relationWidth: clampNumber(obj.relationWidth, RELATION_WIDTH_MIN, RELATION_WIDTH_MAX, d.relationWidth),
+    relationArrowStyle: pickEnum(obj.relationArrowStyle, ["none", "arrow", "triangle"], d.relationArrowStyle),
+    relationOpacity: clampNumber(obj.relationOpacity, 0, 1, d.relationOpacity),
+    relationCurveStrength: clampNumber(obj.relationCurveStrength, 0, 100, d.relationCurveStrength),
+    virtualRendering: typeof obj.virtualRendering === "boolean" ? obj.virtualRendering : d.virtualRendering,
+    renderBuffer: clampNumber(obj.renderBuffer, RENDER_BUFFER_MIN, RENDER_BUFFER_MAX, d.renderBuffer),
+    relationDisplayMode: pickEnum(obj.relationDisplayMode, ["selected", "always", "hidden"], d.relationDisplayMode),
+    debugMode: typeof obj.debugMode === "boolean" ? obj.debugMode : d.debugMode
+  };
 }
 
 // src/view/TimelineView.ts
@@ -159,6 +225,25 @@ var EventStore = class {
 
 // src/store/CacheStore.ts
 var CACHE_PATH = ".obsidian/plugins/novels-timeline-jp/timeline-cache.json";
+function sanitizeCache(raw) {
+  if (!raw || typeof raw !== "object") {
+    return { generatedAt: 0, entries: {} };
+  }
+  const obj = raw;
+  const generatedAt = typeof obj.generatedAt === "number" && Number.isFinite(obj.generatedAt) ? obj.generatedAt : 0;
+  const entriesRaw = obj.entries;
+  const entries = {};
+  if (entriesRaw && typeof entriesRaw === "object" && !Array.isArray(entriesRaw)) {
+    for (const [id, value] of Object.entries(entriesRaw)) {
+      if (!value || typeof value !== "object") continue;
+      const v = value;
+      if (typeof v.order === "number" && Number.isFinite(v.order) && typeof v.date === "string") {
+        entries[id] = { order: v.order, date: v.date };
+      }
+    }
+  }
+  return { generatedAt, entries };
+}
 var CacheStore = class {
   constructor(app) {
     this.cache = { generatedAt: 0, entries: {} };
@@ -169,7 +254,7 @@ var CacheStore = class {
       const adapter = this.app.vault.adapter;
       if (await adapter.exists(CACHE_PATH)) {
         const raw = await adapter.read(CACHE_PATH);
-        this.cache = JSON.parse(raw);
+        this.cache = sanitizeCache(JSON.parse(raw));
       }
     } catch (e) {
       this.cache = { generatedAt: 0, entries: {} };
@@ -216,11 +301,11 @@ var import_obsidian = require("obsidian");
 // src/parser/DateParser.ts
 var DATE_PATTERNS = [
   // 「年・月・日」漢字区切り
-  /(\d+)\s*年\s*(\d+)\s*月\s*(\d+)\s*日/,
+  /^(\d+)\s*年\s*(\d+)\s*月\s*(\d+)\s*日\s*$/,
   // ハイフン区切り
-  /(\d{1,6})[.\-/](\d{1,2})[.\-/](\d{1,2})/,
+  /^(\d{1,6})[.\-/](\d{1,2})[.\-/](\d{1,2})\s*$/,
   // スペース区切り
-  /(\d+)\s+(\d{1,2})\s+(\d{1,2})/
+  /^(\d+)\s+(\d{1,2})\s+(\d{1,2})\s*$/
 ];
 var PREFIX_PATTERN = /^([^\d]*)/;
 var DateParser = class {
@@ -251,8 +336,9 @@ var DateParser = class {
     const trimmed = dateStr.trim();
     const prefixMatch = PREFIX_PATTERN.exec(trimmed);
     const calendarPrefix = prefixMatch ? prefixMatch[1].trim() : "";
+    const remainder = prefixMatch ? trimmed.slice(prefixMatch[1].length) : trimmed;
     for (const pattern of DATE_PATTERNS) {
-      const m = pattern.exec(trimmed);
+      const m = pattern.exec(remainder);
       if (m) {
         const year = parseInt(m[1], 10);
         const month = parseInt(m[2], 10);
@@ -903,16 +989,16 @@ var RelationEngine = class {
       nodeMap.set(node.event.id, node);
     }
     const edges = [];
+    const seenKeys = /* @__PURE__ */ new Set();
     for (const event of events) {
       const fromNode = nodeMap.get(event.id);
       if (!fromNode) continue;
       for (const linkId of event.links) {
         const toNode = nodeMap.get(linkId);
         if (!toNode) continue;
-        const alreadyExists = edges.some(
-          (e) => e.fromId === event.id && e.toId === linkId || e.fromId === linkId && e.toId === event.id
-        );
-        if (alreadyExists) continue;
+        const key = event.id < linkId ? `${event.id}\0${linkId}` : `${linkId}\0${event.id}`;
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
         edges.push({
           fromId: event.id,
           toId: linkId,
@@ -3283,6 +3369,10 @@ var TimelineRenderer = class {
   drawNode(node, isFiltered, isSelected, ctx) {
     const g = document.createElementNS(SVG_NS2, "g");
     g.setAttribute("class", "ntj-node");
+    g.setAttribute("data-event-id", node.event.id);
+    g.setAttribute("tabindex", "-1");
+    g.setAttribute("role", "button");
+    g.setAttribute("aria-label", node.event.displayTitle || node.event.date || "\u30A4\u30D9\u30F3\u30C8");
     const text = this.dayLabel(node);
     const fontSize = this.estimateFontSize(node);
     const w = this.estimateClampedPillWidth(node);
@@ -3336,6 +3426,14 @@ var TimelineRenderer = class {
       e.stopPropagation();
       this.tooltip.hide();
       ctx.onNodeClick(node.event, node, e.clientX, e.clientY);
+    });
+    g.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.tooltip.hide();
+      const rect = e.currentTarget.getBoundingClientRect();
+      ctx.onNodeClick(node.event, node, rect.left + rect.width / 2, rect.top + rect.height / 2);
     });
     g.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return;
@@ -3434,7 +3532,16 @@ var TimelineRenderer = class {
       const gapDays = Math.max(0, gap.toOrder - gap.fromOrder - 1);
       const slotHeight = gap.expanded ? Math.max(EXPANDED_MIN_HEIGHT, gapDays * EXPANDED_PX_PER_DAY) : GAP_SLOT_HEIGHT;
       const el = this.gapRenderer.render(gap, axisX, gapColW, slotHeight);
+      el.setAttribute("data-gap-id", `${gap.fromOrder}:${gap.toOrder}`);
+      el.setAttribute("tabindex", "-1");
+      el.setAttribute("role", "button");
+      el.setAttribute("aria-label", `${gap.label}\uFF08\u30AF\u30EA\u30C3\u30AF\u3067${gap.expanded ? "\u5727\u7E2E" : "\u5C55\u958B"}\uFF09`);
       el.addEventListener("click", () => ctx.onGapClick(gap));
+      el.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+        e.preventDefault();
+        ctx.onGapClick(gap);
+      });
       this.svg.appendChild(el);
     }
   }
@@ -3547,6 +3654,20 @@ var TableView = class {
    * @param onSelectChar   登場人物クリック時: 人物フィルタへ反映する
    * @param onSelectLoc    場所クリック時: 場所フィルタへ反映する
    */
+  /**
+   * クリック可能な要素にキーボード操作対応（Tab移動 + Enter/Spaceで実行）を付与する。
+   * マウスクリックとキーボード操作の両方で同じハンドラーを実行する。
+   */
+  bindActivate(el, handler) {
+    el.setAttribute("role", "button");
+    el.tabIndex = 0;
+    el.addEventListener("click", handler);
+    el.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+      e.preventDefault();
+      handler(e);
+    });
+  }
   render(events, onOpenFile, onSelectLink, onSelectChar, onSelectLoc) {
     this.containerEl.empty();
     if (events.length === 0) {
@@ -3571,7 +3692,8 @@ var TableView = class {
         cls: "ntj-table-link",
         text: event.displayTitle
       });
-      titleLink.addEventListener("click", () => onOpenFile(event.filePath));
+      titleLink.setAttribute("aria-label", `${event.displayTitle} \u3092\u958B\u304F`);
+      this.bindActivate(titleLink, () => onOpenFile(event.filePath));
       row.createEl("td", {
         cls: "ntj-td ntj-td-date",
         text: event.date || "\u2014"
@@ -3580,7 +3702,7 @@ var TableView = class {
       if (event.characters && event.characters.length > 0) {
         for (const c of event.characters) {
           const tag = charTd.createEl("span", { cls: "ntj-table-tag ntj-table-tag-clickable", text: c });
-          tag.addEventListener("click", (e) => {
+          this.bindActivate(tag, (e) => {
             e.stopPropagation();
             onSelectChar(c);
           });
@@ -3592,7 +3714,7 @@ var TableView = class {
       if (event.locations && event.locations.length > 0) {
         for (const l of event.locations) {
           const tag = locTd.createEl("span", { cls: "ntj-table-tag ntj-table-tag-clickable", text: l });
-          tag.addEventListener("click", (e) => {
+          this.bindActivate(tag, (e) => {
             e.stopPropagation();
             onSelectLoc(l);
           });
@@ -3607,7 +3729,7 @@ var TableView = class {
         for (const link of event.links) {
           const targetId = link.replace(/^\[\[/, "").replace(/\]\]$/, "");
           const tag = linkTd.createEl("span", { cls: "ntj-table-tag ntj-table-link-tag", text: targetId });
-          tag.addEventListener("click", (e) => {
+          this.bindActivate(tag, (e) => {
             e.stopPropagation();
             if (!this.scrollToRow(targetId)) onSelectLink(targetId);
           });
@@ -3692,6 +3814,22 @@ var TimelineView = class extends import_obsidian4.ItemView {
     this.nodes = [];
     this.gaps = [];
     this.selectedId = null;
+    // ── キーボード操作（矢印キー）でのフォーカス移動 ──
+    // 仮想描画により画面外の要素はDOMに存在しないため、Tabキーによる
+    // ネイティブなフォーカス移動では画面外へ辿り着けない。
+    // そこで Tab はタイムライン全体（timelineEl）へ一度だけ入る操作とし、
+    // 領域内では ↑/↓（Home/End）キーで時系列順に1件ずつフォーカスを移動する。
+    // 移動先が画面外の場合は自動スクロール→再描画してからフォーカスする。
+    this.focusSequence = [];
+    this.focusedItemType = null;
+    this.focusedItemId = null;
+    // マウス操作（左クリック/右クリック問わず）によってtimelineEl自身へネイティブに
+    // フォーカスが移る際に一時的に立てるフラグ。これが立っている間は「focus」イベント
+    // 側での自動フォーカス委譲（＝直近アイテムへスクロール移動）を行わない。
+    // 未設定だと、レーン背景の空白部分をクリック（右クリックの文脈メニュー表示も含む）
+    // しただけで直近アイテムへ勝手にスクロールしてしまい、右クリックメニューの表示位置が
+    // ずれる不具合が発生する。
+    this.suppressFocusDelegation = false;
     // ノード間日数計測モード
     this.measureMode = false;
     this.measureStartEvent = null;
@@ -3763,6 +3901,12 @@ var TimelineView = class extends import_obsidian4.ItemView {
     this.toolbarEl = root.createDiv({ cls: "ntj-toolbar" });
     this.buildToolbar();
     this.timelineEl = root.createDiv({ cls: "ntj-timeline" });
+    this.timelineEl.setAttribute("tabindex", "0");
+    this.timelineEl.setAttribute("role", "application");
+    this.timelineEl.setAttribute(
+      "aria-label",
+      "\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u3002\u4E0A\u4E0B\u77E2\u5370\u30AD\u30FC\u3067\u30A4\u30D9\u30F3\u30C8\u30FBGAP\u3092\u79FB\u52D5\u3001Enter\u30AD\u30FC\u3067\u8A73\u7D30\u3092\u8868\u793A\u3057\u307E\u3059\u3002"
+    );
     this.zoomWrapperEl = this.timelineEl.createDiv({ cls: "ntj-timeline-zoom-wrapper" });
     this.renderer = new TimelineRenderer(this.zoomWrapperEl);
     this.applyBoardZoom();
@@ -3790,6 +3934,44 @@ var TimelineView = class extends import_obsidian4.ItemView {
       this.timelineEl.scrollLeft += delta;
     }, { passive: false });
     this.registerPanEvents();
+    this.registerDomEvent(this.timelineEl, "mousedown", () => {
+      this.suppressFocusDelegation = true;
+      setTimeout(() => {
+        this.suppressFocusDelegation = false;
+      }, 0);
+    });
+    this.registerDomEvent(this.timelineEl, "focus", () => {
+      if (this.suppressFocusDelegation) {
+        this.suppressFocusDelegation = false;
+        return;
+      }
+      if (this.focusSequence.length === 0) return;
+      let idx = this.focusSequence.findIndex(
+        (it) => it.type === this.focusedItemType && it.id === this.focusedItemId
+      );
+      if (idx === -1) idx = this.nearestFocusIndexToScroll();
+      this.moveFocusToIndex(idx);
+    });
+    this.registerDomEvent(this.timelineEl, "keydown", (e) => {
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          this.moveFocusBy(1);
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          this.moveFocusBy(-1);
+          break;
+        case "Home":
+          e.preventDefault();
+          this.moveFocusToIndex(0);
+          break;
+        case "End":
+          e.preventDefault();
+          this.moveFocusToIndex(this.focusSequence.length - 1);
+          break;
+      }
+    });
     this.registerDomEvent(document, "keydown", (e) => {
       if (e.key === "Escape" && this.measureMode) {
         this.cancelMeasureMode();
@@ -4108,6 +4290,14 @@ var TimelineView = class extends import_obsidian4.ItemView {
     const t0 = performance.now();
     const settings = this.plugin.settings;
     const allEvents = this.eventStore.getAllSorted();
+    const activeEl = document.activeElement;
+    let refocusTarget = null;
+    if (activeEl instanceof Element && this.zoomWrapperEl.contains(activeEl)) {
+      const eventId = activeEl.getAttribute("data-event-id");
+      const gapId = activeEl.getAttribute("data-gap-id");
+      if (eventId) refocusTarget = { type: "node", id: eventId };
+      else if (gapId) refocusTarget = { type: "gap", id: gapId };
+    }
     const validEvents = allEvents.filter((e) => !e.error);
     const filtered = this.filterEngine.apply(validEvents, this.filterState);
     const filteredIds = filtered.length < validEvents.length ? new Set(filtered.map((e) => e.id)) : null;
@@ -4124,6 +4314,7 @@ var TimelineView = class extends import_obsidian4.ItemView {
       settings.gapCompression
     );
     this.gapEngine.updateGapYPositions(this.gaps, this.nodes);
+    this.focusSequence = this.buildFocusSequence();
     const totalWidth = this.layoutEngine.calcTotalWidth(settings.laneCount);
     const totalHeight = this.layoutEngine.calcTotalHeight(this.nodes);
     const edges = this.relationEngine.buildEdges(validEvents, this.nodes);
@@ -4158,6 +4349,9 @@ var TimelineView = class extends import_obsidian4.ItemView {
       onLaneDrop: (eventId, targetLane) => this.handleLaneDrop(eventId, targetLane),
       resolveNodeColors: (event) => this.plugin.colorPresetStore.resolve(event.color)
     });
+    if (refocusTarget) {
+      this.focusRenderedItem(refocusTarget);
+    }
     const tableEvents = filtered.length < validEvents.length ? filtered : validEvents;
     this.tableView.render(
       tableEvents,
@@ -4171,6 +4365,95 @@ var TimelineView = class extends import_obsidian4.ItemView {
     );
     const t1 = performance.now();
     this.updateDebugOverlay(validEvents.length, this.nodes.length, this.gaps.length, t1 - t0);
+  }
+  // ----------------------------------------------------------
+  // 矢印キーによるフォーカス移動（仮想描画と両立するキーボード操作）
+  // ----------------------------------------------------------
+  /** ノード・GapをY座標（時系列）順に並べたフォーカス移動シーケンスを構築する */
+  buildFocusSequence() {
+    const items = [];
+    for (const node of this.nodes) {
+      items.push({ type: "node", id: node.event.id, y: node.y, x: node.x });
+    }
+    for (const gap of this.gaps) {
+      items.push({ type: "gap", id: `${gap.fromOrder}:${gap.toOrder}`, y: gap.y, x: AXIS_X });
+    }
+    items.sort((a, b) => a.y - b.y || a.x - b.x);
+    return items;
+  }
+  /** 現在のフォーカス位置から指定方向へ1件移動する。未フォーカス時は現在のスクロール位置に最も近い項目から開始する */
+  moveFocusBy(direction) {
+    if (this.focusSequence.length === 0) return;
+    const currentIdx = this.focusSequence.findIndex(
+      (it) => it.type === this.focusedItemType && it.id === this.focusedItemId
+    );
+    const nextIdx = currentIdx === -1 ? this.nearestFocusIndexToScroll() : Math.max(0, Math.min(this.focusSequence.length - 1, currentIdx + direction));
+    this.moveFocusToIndex(nextIdx);
+  }
+  /** 現在のスクロール位置（縦方向）に最も近いフォーカス項目のインデックスを返す */
+  nearestFocusIndexToScroll() {
+    if (this.focusSequence.length === 0) return -1;
+    const zoomFactor = this.plugin.settings.boardZoom / 100;
+    const targetY = this.timelineEl.scrollTop / zoomFactor;
+    let best = 0;
+    let bestDiff = Infinity;
+    this.focusSequence.forEach((item, i) => {
+      const diff = Math.abs(item.y - targetY);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = i;
+      }
+    });
+    return best;
+  }
+  /**
+   * 指定インデックスの項目へフォーカスを移動する。
+   * 画面外（仮想描画バッファの外）にある場合は自動スクロールしたうえで
+   * 同期的に再描画し、対応するDOM要素を探してフォーカスする。
+   * （scheduleRender()の50msデバウンスを待つとフォーカスが遅延・消失するため、
+   *   ここでは直接doRender()を呼ぶ）
+   */
+  moveFocusToIndex(idx) {
+    if (idx < 0 || idx >= this.focusSequence.length) return;
+    const item = this.focusSequence[idx];
+    this.focusedItemType = item.type;
+    this.focusedItemId = item.id;
+    this.scrollFocusItemIntoView(item);
+    this.doRender();
+    this.focusRenderedItem(item);
+  }
+  /** 項目が現在の表示範囲外（固定ヘッダー・固定左列に隠れる位置も含む）にある場合のみスクロールする */
+  scrollFocusItemIntoView(item) {
+    const zoomFactor = this.plugin.settings.boardZoom / 100;
+    const margin = 24;
+    const headerPx = HEADER_H * zoomFactor;
+    const leftColPx = LANES_START_X * zoomFactor;
+    const itemH = 24 * zoomFactor;
+    const viewTop = this.timelineEl.scrollTop;
+    const viewBottom = viewTop + this.timelineEl.clientHeight;
+    const itemTopPx = item.y * zoomFactor;
+    const itemBottomPx = itemTopPx + itemH;
+    if (itemTopPx < viewTop + headerPx + margin) {
+      this.timelineEl.scrollTop = Math.max(0, itemTopPx - headerPx - margin);
+    } else if (itemBottomPx > viewBottom - margin) {
+      this.timelineEl.scrollTop = itemBottomPx - this.timelineEl.clientHeight + margin;
+    }
+    const viewLeft = this.timelineEl.scrollLeft;
+    const viewRight = viewLeft + this.timelineEl.clientWidth;
+    const itemXPx = item.x * zoomFactor;
+    if (itemXPx < viewLeft + leftColPx + margin) {
+      this.timelineEl.scrollLeft = Math.max(0, itemXPx - leftColPx - margin);
+    } else if (itemXPx > viewRight - margin) {
+      this.timelineEl.scrollLeft = itemXPx - this.timelineEl.clientWidth + margin;
+    }
+  }
+  /** 再描画後のDOMから対象要素を探してフォーカスする */
+  focusRenderedItem(item) {
+    const selector = item.type === "node" ? `[data-event-id="${CSS.escape(item.id)}"]` : `[data-gap-id="${CSS.escape(item.id)}"]`;
+    const el = this.zoomWrapperEl.querySelector(selector);
+    if (el && typeof el.focus === "function") {
+      el.focus({ preventScroll: true });
+    }
   }
   // ----------------------------------------------------------
   // デバッグオーバーレイ
@@ -4435,6 +4718,17 @@ var DEFAULT_PRESETS = [
   { id: "default-purple", name: "\u7D2B", nodeColor: "#8E6FCE", textColor: "#ffffff" },
   { id: "default-gray", name: "\u30B0\u30EC\u30FC\uFF08\u65E2\u5B9A\uFF09", nodeColor: "#808080", textColor: "#ffffff" }
 ];
+var HEX_COLOR_RE2 = /^#[0-9A-Fa-f]{3,8}$/;
+function isValidColorPreset(value) {
+  if (!value || typeof value !== "object") return false;
+  const v = value;
+  return typeof v.id === "string" && v.id.length > 0 && typeof v.name === "string" && typeof v.nodeColor === "string" && HEX_COLOR_RE2.test(v.nodeColor) && typeof v.textColor === "string" && HEX_COLOR_RE2.test(v.textColor);
+}
+function sanitizePresets(raw) {
+  const parsed = raw;
+  const list = parsed && Array.isArray(parsed.presets) ? parsed.presets : [];
+  return list.filter(isValidColorPreset);
+}
 var ColorPresetStore = class {
   constructor(app) {
     this.presets = [];
@@ -4445,8 +4739,8 @@ var ColorPresetStore = class {
       const adapter = this.app.vault.adapter;
       if (await adapter.exists(PRESET_PATH)) {
         const raw = await adapter.read(PRESET_PATH);
-        const parsed = JSON.parse(raw);
-        this.presets = Array.isArray(parsed.presets) ? parsed.presets : [];
+        const sanitized = sanitizePresets(JSON.parse(raw));
+        this.presets = sanitized.length > 0 ? sanitized : DEFAULT_PRESETS.slice();
       } else {
         this.presets = DEFAULT_PRESETS.slice();
         await this.save();
@@ -4486,7 +4780,7 @@ var ColorPresetStore = class {
   resolve(colorField) {
     const preset = this.getById(colorField);
     if (preset) return { nodeColor: preset.nodeColor, textColor: preset.textColor };
-    if (/^#[0-9A-Fa-f]{3,8}$/.test(colorField)) {
+    if (HEX_COLOR_RE2.test(colorField)) {
       return { nodeColor: colorField, textColor: "#ffffff" };
     }
     return { nodeColor: "#808080", textColor: "#ffffff" };
@@ -4731,7 +5025,7 @@ var ColorPresetModal = class extends import_obsidian6.Modal {
 
 // src/view/EventSidebarView.ts
 var EVENT_SIDEBAR_VIEW_TYPE = "novels-timeline-jp-sidebar";
-var INVALID_FILENAME_CHARS = /[\\/:*?"<>|]/;
+var INVALID_FILENAME_CHARS = /[\\/:*?"<>|[\]]/;
 var EventSidebarView = class extends import_obsidian7.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
@@ -5104,8 +5398,10 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
     const date = DateParser.normalizeFullWidth(dateRaw);
     const lane = parseInt(laneStr, 10);
     const color = colorVal || "#808080";
-    await this.createEventFile({ title, date, lane, size, color, chars, locs, summary, folder, links });
-    this.closeLeaf();
+    const created = await this.createEventFile({ title, date, lane, size, color, chars, locs, summary, folder, links });
+    if (created) {
+      this.closeLeaf();
+    }
   }
   // ----------------------------------------------------------
   // フォーム送信：編集保存
@@ -5175,7 +5471,7 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
     if (!title) {
       errors.push("\u30BF\u30A4\u30C8\u30EB\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
     } else if (INVALID_FILENAME_CHARS.test(title)) {
-      errors.push(`\u30BF\u30A4\u30C8\u30EB\u306B\u4F7F\u7528\u3067\u304D\u306A\u3044\u8A18\u53F7\u304C\u542B\u307E\u308C\u3066\u3044\u307E\u3059\uFF08\\ / : * ? " < > |\uFF09`);
+      errors.push(`\u30BF\u30A4\u30C8\u30EB\u306B\u4F7F\u7528\u3067\u304D\u306A\u3044\u8A18\u53F7\u304C\u542B\u307E\u308C\u3066\u3044\u307E\u3059\uFF08\\ / : * ? " < > | [ ]\uFF09`);
     }
     const normalized = DateParser.normalizeFullWidth(dateRaw);
     if (!normalized) {
@@ -5275,8 +5571,10 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
     try {
       await vault.create(fullPath, content);
       new import_obsidian7.Notice(`\u4F5C\u6210\u3057\u307E\u3057\u305F: ${fullPath}`);
+      return true;
     } catch (e) {
       new import_obsidian7.Notice(`\u4F5C\u6210\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${e.message}`);
+      return false;
     }
   }
   // ----------------------------------------------------------
@@ -5296,13 +5594,13 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
     lines.push(`${NTJP_KEYS.colors}: "${fields.color}"`);
     if (fields.characters.length > 0) {
       lines.push(`${NTJP_KEYS.characters}:`);
-      for (const c of fields.characters) lines.push(`  - ${c}`);
+      for (const c of fields.characters) lines.push(`  - "${this.escapeYamlDouble(c)}"`);
     } else {
       lines.push(`${NTJP_KEYS.characters}: []`);
     }
     if (fields.locations.length > 0) {
       lines.push(`${NTJP_KEYS.locations}:`);
-      for (const l of fields.locations) lines.push(`  - ${l}`);
+      for (const l of fields.locations) lines.push(`  - "${this.escapeYamlDouble(l)}"`);
     } else {
       lines.push(`${NTJP_KEYS.locations}: []`);
     }
@@ -5415,6 +5713,7 @@ var NovelsTimelineSettingTab = class extends import_obsidian8.PluginSettingTab {
   // ----------------------------------------------------------
   async setControlValue(key, value) {
     this.plugin.settings[key] = value;
+    this.plugin.settings = sanitizeSettings(this.plugin.settings);
     await this.plugin.saveSettings();
     this.plugin.notifySettingsChanged();
   }
@@ -5675,7 +5974,7 @@ var CalendarSettingsPage = class extends import_obsidian8.SettingPage {
     );
     new import_obsidian8.Setting(containerEl).setName("\u30C7\u30D5\u30A9\u30EB\u30C8\u66A6\u306B\u623B\u3059").setDesc("\u66A6\u540D\u3092\u300C\u897F\u66A6\u300D\u3001\u6708\u540D\u3092\u672A\u8A2D\u5B9A\u306B\u30EA\u30BB\u30C3\u30C8\u3057\u307E\u3059").addButton(
       (btn) => btn.setButtonText("\u30EA\u30BB\u30C3\u30C8").setDestructive().onClick(async () => {
-        this.plugin.settings.calendar = JSON.parse(JSON.stringify(DEFAULT_CALENDAR));
+        this.plugin.settings.calendar = cloneDefaultCalendar();
         await this.plugin.saveSettings();
         this.plugin.notifySettingsChanged();
         this.display();
@@ -5727,7 +6026,15 @@ var CalendarSettingsPage = class extends import_obsidian8.SettingPage {
     });
     const delTd = tr.createEl("td");
     const delBtn = delTd.createEl("button", { text: "\u524A\u9664" });
+    if (months.length <= 1) {
+      delBtn.disabled = true;
+      delBtn.setAttribute("title", "\u66A6\u306B\u306F\u6700\u4F4E1\u304B\u6708\u304C\u5FC5\u8981\u3067\u3059");
+    }
     delBtn.addEventListener("click", async () => {
+      if (months.length <= 1) {
+        new import_obsidian8.Notice("\u66A6\u306B\u306F\u6700\u4F4E1\u304B\u6708\u304C\u5FC5\u8981\u3067\u3059\u3002\u3053\u308C\u4EE5\u4E0A\u524A\u9664\u3067\u304D\u307E\u305B\u3093\u3002");
+        return;
+      }
       months.splice(index, 1);
       months.forEach((m, i) => {
         m.month = i + 1;
@@ -5780,7 +6087,7 @@ var NovelsTimelinePlugin = class extends import_obsidian9.Plugin {
   // 設定
   // ----------------------------------------------------------
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.settings = sanitizeSettings(await this.loadData());
   }
   /**
    * 設定をディスクに保存する。

@@ -23,6 +23,9 @@ export class RelationEngine {
     }
 
     const edges: RelationEdge[] = [];
+    // 双方向の重複チェックをO(1)で行うためのキー集合
+    // （"a\u0000b" と "b\u0000a" のどちらかが既にあれば重複とみなす）
+    const seenKeys = new Set<string>();
 
     for (const event of events) {
       const fromNode = nodeMap.get(event.id);
@@ -34,12 +37,11 @@ export class RelationEngine {
         if (!toNode) continue; // ⚠ Missing Event: Renderer側でエラー表示
 
         // 重複チェック（双方向に重複する場合は1本のみ）
-        const alreadyExists = edges.some(
-          (e) =>
-            (e.fromId === event.id && e.toId === linkId) ||
-            (e.fromId === linkId   && e.toId === event.id)
-        );
-        if (alreadyExists) continue;
+        const key = event.id < linkId
+          ? `${event.id}\u0000${linkId}`
+          : `${linkId}\u0000${event.id}`;
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
 
         edges.push({
           fromId:   event.id,

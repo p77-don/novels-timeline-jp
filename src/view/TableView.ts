@@ -21,6 +21,21 @@ export class TableView {
    * @param onSelectChar   登場人物クリック時: 人物フィルタへ反映する
    * @param onSelectLoc    場所クリック時: 場所フィルタへ反映する
    */
+  /**
+   * クリック可能な要素にキーボード操作対応（Tab移動 + Enter/Spaceで実行）を付与する。
+   * マウスクリックとキーボード操作の両方で同じハンドラーを実行する。
+   */
+  private bindActivate(el: HTMLElement, handler: (e: Event) => void): void {
+    el.setAttribute("role", "button");
+    el.tabIndex = 0;
+    el.addEventListener("click", handler);
+    el.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+      e.preventDefault();
+      handler(e);
+    });
+  }
+
   render(
     events: TimelineEvent[],
     onOpenFile:   (filePath: string) => void,
@@ -61,7 +76,8 @@ export class TableView {
         cls:  "ntj-table-link",
         text: event.displayTitle,
       });
-      titleLink.addEventListener("click", () => onOpenFile(event.filePath));
+      titleLink.setAttribute("aria-label", `${event.displayTitle} を開く`);
+      this.bindActivate(titleLink, () => onOpenFile(event.filePath));
 
       // 日付
       row.createEl("td", {
@@ -74,7 +90,7 @@ export class TableView {
       if (event.characters && event.characters.length > 0) {
         for (const c of event.characters) {
           const tag = charTd.createEl("span", { cls: "ntj-table-tag ntj-table-tag-clickable", text: c });
-          tag.addEventListener("click", (e) => { e.stopPropagation(); onSelectChar(c); });
+          this.bindActivate(tag, (e) => { e.stopPropagation(); onSelectChar(c); });
         }
       } else {
         charTd.textContent = "—";
@@ -85,7 +101,7 @@ export class TableView {
       if (event.locations && event.locations.length > 0) {
         for (const l of event.locations) {
           const tag = locTd.createEl("span", { cls: "ntj-table-tag ntj-table-tag-clickable", text: l });
-          tag.addEventListener("click", (e) => { e.stopPropagation(); onSelectLoc(l); });
+          this.bindActivate(tag, (e) => { e.stopPropagation(); onSelectLoc(l); });
         }
       } else {
         locTd.textContent = "—";
@@ -104,7 +120,7 @@ export class TableView {
           // "[[0002-地下室発見]]" → "0002-地下室発見" を抽出（旧形式との後方互換のため）
           const targetId = link.replace(/^\[\[/, "").replace(/\]\]$/, "");
           const tag = linkTd.createEl("span", { cls: "ntj-table-tag ntj-table-link-tag", text: targetId });
-          tag.addEventListener("click", (e) => {
+          this.bindActivate(tag, (e) => {
             e.stopPropagation();
             if (!this.scrollToRow(targetId)) onSelectLink(targetId);
           });

@@ -619,6 +619,14 @@ export class TimelineRenderer {
   ): void {
     const g = document.createElementNS(SVG_NS, "g");
     g.setAttribute("class", "ntj-node");
+    g.setAttribute("data-event-id", node.event.id);
+    // キーボード操作対応: 矢印キーによるロービングフォーカス方式のため、
+    // Tabキーでは個々のノードへは止まらない（tabindex=-1）。
+    // TimelineView側が矢印キー操作に応じて focus() を呼び出す。
+    // Enter/Spaceでクリックと同じ動作（Popover表示）を行う点は変わらない。
+    g.setAttribute("tabindex", "-1");
+    g.setAttribute("role", "button");
+    g.setAttribute("aria-label", node.event.displayTitle || node.event.date || "イベント");
 
     const text     = this.dayLabel(node);
     const fontSize = this.estimateFontSize(node);
@@ -674,6 +682,16 @@ export class TimelineRenderer {
       e.stopPropagation();
       this.tooltip.hide();
       ctx.onNodeClick(node.event, node, e.clientX, e.clientY);
+    });
+    g.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.tooltip.hide();
+      // キーボード操作にはマウス座標がないため、要素自身の中心座標をPopoverの
+      // 表示位置として代用する
+      const rect = (e.currentTarget as SVGGraphicsElement).getBoundingClientRect();
+      ctx.onNodeClick(node.event, node, rect.left + rect.width / 2, rect.top + rect.height / 2);
     });
     g.addEventListener("mousedown", (e: MouseEvent) => {
       if (e.button !== 0) return;
@@ -805,7 +823,17 @@ export class TimelineRenderer {
         : GAP_SLOT_HEIGHT;
 
       const el = this.gapRenderer.render(gap, axisX, gapColW, slotHeight);
+      el.setAttribute("data-gap-id", `${gap.fromOrder}:${gap.toOrder}`);
+      // ノードと同様、Tabでは止まらずTimelineView側からfocus()される（ロービングフォーカス）
+      el.setAttribute("tabindex", "-1");
+      el.setAttribute("role", "button");
+      el.setAttribute("aria-label", `${gap.label}（クリックで${gap.expanded ? "圧縮" : "展開"}）`);
       el.addEventListener("click", () => ctx.onGapClick(gap));
+      el.addEventListener("keydown", (e: KeyboardEvent) => {
+        if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+        e.preventDefault();
+        ctx.onGapClick(gap);
+      });
       this.svg.appendChild(el);
     }
   }

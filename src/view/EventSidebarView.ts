@@ -24,8 +24,10 @@ export type SidebarMode =
   | { type: "view-edit"; event: TimelineEvent }
   | { type: "idle" };
 
-// ファイル名に使えない文字
-const INVALID_FILENAME_CHARS = /[\\/:*?"<>|]/;
+// ファイル名に使えない文字（[ ] は禁止文字ではないが、そのまま許すと
+// タイトルをファイル名やwikilink [[...]] へ埋め込む際に構文が壊れるため
+// ここで併せて禁止する）
+const INVALID_FILENAME_CHARS = /[\\/:*?"<>|[\]]/;
 
 /** 関連イベント選択リストで使う軽量な一覧アイテム */
 interface EventListItem {
@@ -466,8 +468,12 @@ export class EventSidebarView extends ItemView {
     const lane = parseInt(laneStr, 10);
     const color = colorVal || "#808080";
 
-    await this.createEventFile({ title, date, lane, size, color, chars, locs, summary, folder, links });
-    this.closeLeaf();
+    const created = await this.createEventFile({ title, date, lane, size, color, chars, locs, summary, folder, links });
+    // 失敗時は Notice で理由を表示済みなのでフォームは残し、closeLeaf() しない。
+    // ここで閉じてしまうと、ノートが作成されていないのに入力内容が失われる。
+    if (created) {
+      this.closeLeaf();
+    }
   }
 
   // ----------------------------------------------------------
@@ -555,7 +561,7 @@ export class EventSidebarView extends ItemView {
     if (!title) {
       errors.push("タイトルを入力してください。");
     } else if (INVALID_FILENAME_CHARS.test(title)) {
-      errors.push(`タイトルに使用できない記号が含まれています（\\ / : * ? " < > |）`);
+      errors.push(`タイトルに使用できない記号が含まれています（\\ / : * ? " < > | [ ]）`);
     }
 
     // ── 日付 ──
@@ -638,7 +644,7 @@ export class EventSidebarView extends ItemView {
     size: string; color: string; chars: string;
     locs: string; summary: string; folder: string;
     links: string[];
-  }): Promise<void> {
+  }): Promise<boolean> {
     const vault = this.plugin.app.vault;
 
     // ファイル名の連番は、既存イベントファイルの "NNNN-" プレフィックスの
@@ -679,8 +685,10 @@ export class EventSidebarView extends ItemView {
       await vault.create(fullPath, content);
       // 作成のたびにノートが開くと煩わしいため、ここでは開かない。
       new Notice(`作成しました: ${fullPath}`);
+      return true;
     } catch (e) {
       new Notice(`作成に失敗しました: ${(e as Error).message}`);
+      return false;
     }
   }
 
@@ -714,14 +722,14 @@ export class EventSidebarView extends ItemView {
 
     if (fields.characters.length > 0) {
       lines.push(`${NTJP_KEYS.characters}:`);
-      for (const c of fields.characters) lines.push(`  - ${c}`);
+      for (const c of fields.characters) lines.push(`  - "${this.escapeYamlDouble(c)}"`);
     } else {
       lines.push(`${NTJP_KEYS.characters}: []`);
     }
 
     if (fields.locations.length > 0) {
       lines.push(`${NTJP_KEYS.locations}:`);
-      for (const l of fields.locations) lines.push(`  - ${l}`);
+      for (const l of fields.locations) lines.push(`  - "${this.escapeYamlDouble(l)}"`);
     } else {
       lines.push(`${NTJP_KEYS.locations}: []`);
     }

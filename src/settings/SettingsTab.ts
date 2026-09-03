@@ -20,7 +20,6 @@ import {
 import type NovelsTimelinePlugin from "../main";
 import { CalendarMonth, CalendarSettings } from "../types/TimelineTypes";
 import {
-  DEFAULT_CALENDAR,
   BOARD_ZOOM_MIN,
   BOARD_ZOOM_MAX,
   BOARD_ZOOM_DEFAULT,
@@ -32,6 +31,8 @@ import {
   LANE_COUNT_MAX,
   LANE_COUNT_DEFAULT,
   LANE_COUNT_STEP,
+  cloneDefaultCalendar,
+  sanitizeSettings,
 } from "./PluginSettings";
 import { ColorPresetModal } from "../view/ColorPresetModal";
 
@@ -52,6 +53,10 @@ export class NovelsTimelineSettingTab extends PluginSettingTab {
   // ----------------------------------------------------------
   async setControlValue(key: string, value: unknown): Promise<void> {
     (this.plugin.settings as unknown as Record<string, unknown>)[key] = value;
+    // 各コントロールのmin/max等でUI側では基本的に範囲外の値は入力できないが、
+    // 将来のコントロール追加ミスや、この経路を通らない手編集データとの整合を
+    // 保つための二重の安全網として、保存前に必ず検証・補正する。
+    this.plugin.settings = sanitizeSettings(this.plugin.settings);
     await this.plugin.saveSettings();
     this.plugin.notifySettingsChanged();
   }
@@ -400,7 +405,7 @@ class CalendarSettingsPage extends SettingPage {
           .setButtonText("リセット")
           .setDestructive()
           .onClick(async () => {
-            this.plugin.settings.calendar = JSON.parse(JSON.stringify(DEFAULT_CALENDAR));
+            this.plugin.settings.calendar = cloneDefaultCalendar();
             await this.plugin.saveSettings();
             this.plugin.notifySettingsChanged();
             this.display();
@@ -469,9 +474,19 @@ class CalendarSettingsPage extends SettingPage {
     });
 
     // 削除ボタン
+    // 暦の月数が0になると calcYearDays() が0を返し、全イベントの日付が
+    // 不正扱いになってしまうため、最後の1か月は削除できないようにする。
     const delTd = tr.createEl("td");
     const delBtn = delTd.createEl("button", { text: "削除" });
+    if (months.length <= 1) {
+      delBtn.disabled = true;
+      delBtn.setAttribute("title", "暦には最低1か月が必要です");
+    }
     delBtn.addEventListener("click", async () => {
+      if (months.length <= 1) {
+        new Notice("暦には最低1か月が必要です。これ以上削除できません。");
+        return;
+      }
       months.splice(index, 1);
       // 月番号を振り直す
       months.forEach((m, i) => { m.month = i + 1; });

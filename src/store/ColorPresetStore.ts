@@ -19,6 +19,31 @@ const DEFAULT_PRESETS: ColorPreset[] = [
   { id: "default-gray",   name: "グレー（既定）", nodeColor: "#808080", textColor: "#ffffff" },
 ];
 
+/** イベントのcolorフィールドとして許容するHEX表記（resolve()と同じ判定を流用） */
+const HEX_COLOR_RE = /^#[0-9A-Fa-f]{3,8}$/;
+
+function isValidColorPreset(value: unknown): value is ColorPreset {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" && v.id.length > 0 &&
+    typeof v.name === "string" &&
+    typeof v.nodeColor === "string" && HEX_COLOR_RE.test(v.nodeColor) &&
+    typeof v.textColor === "string" && HEX_COLOR_RE.test(v.textColor)
+  );
+}
+
+/**
+ * 配色セットファイルの中身（unknown相当）を検証し、形の正しい要素だけを残す。
+ * 手編集や旧バージョンとの互換性の問題で1要素だけ壊れていても、
+ * それ以外のプリセットを巻き添えで失わないようにする。
+ */
+function sanitizePresets(raw: unknown): ColorPreset[] {
+  const parsed = raw as Partial<ColorPresetFile> | null | undefined;
+  const list = parsed && Array.isArray(parsed.presets) ? parsed.presets : [];
+  return list.filter(isValidColorPreset);
+}
+
 export class ColorPresetStore {
   private app: App;
   private presets: ColorPreset[] = [];
@@ -32,8 +57,10 @@ export class ColorPresetStore {
       const adapter = this.app.vault.adapter;
       if (await adapter.exists(PRESET_PATH)) {
         const raw = await adapter.read(PRESET_PATH);
-        const parsed = JSON.parse(raw) as ColorPresetFile;
-        this.presets = Array.isArray(parsed.presets) ? parsed.presets : [];
+        const sanitized = sanitizePresets(JSON.parse(raw));
+        // 検証の結果1件も残らなかった場合（壊れたファイル・空配列等）は
+        // 既定セットへフォールバックする
+        this.presets = sanitized.length > 0 ? sanitized : DEFAULT_PRESETS.slice();
       } else {
         // 初回起動：既定セットを書き込んでおく
         this.presets = DEFAULT_PRESETS.slice();
@@ -79,7 +106,7 @@ export class ColorPresetStore {
     const preset = this.getById(colorField);
     if (preset) return { nodeColor: preset.nodeColor, textColor: preset.textColor };
 
-    if (/^#[0-9A-Fa-f]{3,8}$/.test(colorField)) {
+    if (HEX_COLOR_RE.test(colorField)) {
       return { nodeColor: colorField, textColor: "#ffffff" };
     }
 

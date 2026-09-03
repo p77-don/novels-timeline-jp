@@ -52,14 +52,21 @@ export type DateParseOutcome = DateParseResult | DateParseError;
 //   1345 5 12
 // ------------------------------------------------------------
 
-/** 年月日を数値として取り出す正規表現群（優先順に試行） */
+/**
+ * 年月日を数値として取り出す正規表現群（優先順に試行）
+ *
+ * 暦プレフィックス除去後の残り文字列（末尾の空白を除く）に対して
+ * ^ / $ で完全一致させる。これにより「2025/1/1 typo」や
+ * 「帝国暦1345年5月12日（仮）」のような、末尾に無関係な文字を含む
+ * 値を「先頭部分だけ一致」で誤って受理してしまうことを防ぐ。
+ */
 const DATE_PATTERNS: RegExp[] = [
   // 「年・月・日」漢字区切り
-  /(\d+)\s*年\s*(\d+)\s*月\s*(\d+)\s*日/,
+  /^(\d+)\s*年\s*(\d+)\s*月\s*(\d+)\s*日\s*$/,
   // ハイフン区切り
-  /(\d{1,6})[.\-/](\d{1,2})[.\-/](\d{1,2})/,
+  /^(\d{1,6})[.\-/](\d{1,2})[.\-/](\d{1,2})\s*$/,
   // スペース区切り
-  /(\d+)\s+(\d{1,2})\s+(\d{1,2})/,
+  /^(\d+)\s+(\d{1,2})\s+(\d{1,2})\s*$/,
 ];
 
 /** 暦プレフィックスを抽出する正規表現（数字の直前にある非数字文字列） */
@@ -104,13 +111,15 @@ export class DateParser {
 
     const trimmed = dateStr.trim();
 
-    // プレフィックス抽出（表示用のみ）
+    // プレフィックス抽出（表示用のみ）。PREFIX_PATTERN は先頭から最初の数字の
+    // 直前までを貪欲に取るため、remainder は必ず数字から始まる。
     const prefixMatch = PREFIX_PATTERN.exec(trimmed);
     const calendarPrefix = prefixMatch ? prefixMatch[1].trim() : "";
+    const remainder = prefixMatch ? trimmed.slice(prefixMatch[1].length) : trimmed;
 
-    // 年月日数値を抽出
+    // 年月日数値を抽出（remainder全体に一致する形式のみ受理）
     for (const pattern of DATE_PATTERNS) {
-      const m = pattern.exec(trimmed);
+      const m = pattern.exec(remainder);
       if (m) {
         const year  = parseInt(m[1], 10);
         const month = parseInt(m[2], 10);

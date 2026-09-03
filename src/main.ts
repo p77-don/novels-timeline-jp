@@ -4,7 +4,7 @@
 // ============================================================
 
 import { Plugin, WorkspaceLeaf, Notice } from "obsidian";
-import { NovelsTimelineSettings, DEFAULT_SETTINGS } from "./settings/PluginSettings";
+import { NovelsTimelineSettings, sanitizeSettings } from "./settings/PluginSettings";
 import { TimelineView, TIMELINE_VIEW_TYPE } from "./view/TimelineView";
 import { EventSidebarView, EVENT_SIDEBAR_VIEW_TYPE } from "./view/EventSidebarView";
 import { NovelsTimelineSettingTab } from "./settings/SettingsTab";
@@ -68,7 +68,11 @@ export default class NovelsTimelinePlugin extends Plugin {
   // ----------------------------------------------------------
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    // loadData() の戻り値は unknown 相当（手編集・旧バージョンの形式の可能性がある）。
+    // Object.assign() による浅いマージでは calendar 等のネストした値を検証できず、
+    // また未設定時に DEFAULT_SETTINGS.calendar（定数）への参照を共有してしまうため、
+    // sanitizeSettings() で型・範囲を検証し、常に独立したオブジェクトを得る。
+    this.settings = sanitizeSettings(await this.loadData());
   }
 
   /**

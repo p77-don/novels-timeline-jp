@@ -14,7 +14,7 @@ import {
 import { EventStore }       from "../store/EventStore";
 import { CacheStore }       from "../store/CacheStore";
 import { DiscoveryEngine }  from "../engine/DiscoveryEngine";
-import { LayoutEngine, LANE_MIN } from "../engine/LayoutEngine";
+import { LayoutEngine, LANE_MIN, HEADER_H, LANES_START_X, AXIS_X } from "../engine/LayoutEngine";
 import { RelationEngine }   from "../engine/RelationEngine";
 import { GapEngine }        from "../engine/GapEngine";
 import { FilterEngine }     from "../engine/FilterEngine";
@@ -43,6 +43,18 @@ import type NovelsTimelinePlugin from "../main";
 
 export const TIMELINE_VIEW_TYPE = "novels-timeline-jp";
 
+/** 矢印キーによるフォーカス移動シーケンスの1要素（ノードまたはGap） */
+interface FocusItem {
+  type: "node" | "gap";
+  /** node: event.id / gap: `${fromOrder}:${toOrder}`（TimelineRendererのdata属性と一致させる） */
+  id: string;
+  y: number;
+  x: number;
+}
+
+/** フォーカス対象の種別とIDのみを表す（doRender()での再フォーカス復元用） */
+type FocusRef = Pick<FocusItem, "type" | "id">;
+
 export class TimelineView extends ItemView {
   private plugin: NovelsTimelinePlugin;
 
@@ -58,6 +70,23 @@ export class TimelineView extends ItemView {
   private nodes:       LayoutNode[]  = [];
   private gaps:        GapSegment[]  = [];
   private selectedId:  string | null = null;
+
+  // ── キーボード操作（矢印キー）でのフォーカス移動 ──
+  // 仮想描画により画面外の要素はDOMに存在しないため、Tabキーによる
+  // ネイティブなフォーカス移動では画面外へ辿り着けない。
+  // そこで Tab はタイムライン全体（timelineEl）へ一度だけ入る操作とし、
+  // 領域内では ↑/↓（Home/End）キーで時系列順に1件ずつフォーカスを移動する。
+  // 移動先が画面外の場合は自動スクロール→再描画してからフォーカスする。
+  private focusSequence:   FocusItem[] = [];
+  private focusedItemType: "node" | "gap" | null = null;
+  private focusedItemId:   string | null = null;
+  // マウス操作（左クリック/右クリック問わず）によってtimelineEl自身へネイティブに
+  // フォーカスが移る際に一時的に立てるフラグ。これが立っている間は「focus」イベント
+  // 側での自動フォーカス委譲（＝直近アイテムへスクロール移動）を行わない。
+  // 未設定だと、レーン背景の空白部分をクリック（右クリックの文脈メニュー表示も含む）
+  // しただけで直近アイテムへ勝手にスクロールしてしまい、右クリックメニューの表示位置が
+  // ずれる不具合が発生する。
+  private suppressFocusDelegation = false;
 
   // ノード間日数計測モード
   private measureMode:       boolean = false;
@@ -150,6 +179,14 @@ export class TimelineView extends ItemView {
     this.buildToolbar();
 
     this.timelineEl = root.createDiv({ cls: "ntj-timeline" });
+    // キーボード操作対応: Tabではここへ一度だけ入り、↑/↓（Home/End）で
+    // イベント・GAPを時系列順に1件ずつフォーカス移動する（ロービングフォーカス）。
+    this.timelineEl.setAttribute("tabindex", "0");
+    this.timelineEl.setAttribute("role", "application");
+    this.timelineEl.setAttribute(
+      "aria-label",
+      "タイムライン。上下矢印キーでイベント・GAPを移動、Enterキーで詳細を表示します。"
+    );
 
     // ズームラッパー：この要素にのみ CSS zoom を適用し、
     // ボード（スクロール範囲）全体を拡大縮小する。
@@ -196,6 +233,58 @@ export class TimelineView extends ItemView {
     // ドラッグパン（上下左右）
     // ノードのドラッグ（lane変更）と区別するため、SVG背景上のみ反応させる
     this.registerPanEvents();
+
+    // マウスの mousedown はフォーカス移動より必ず先に発生するため、ここでフラグを
+    // 立てておくことで、直後に発火する「focus」がマウス起因かどうかを判別する。
+    // 右クリック（contextmenu）も mousedown を伴うためこれで検知できる。
+    this.registerDomEvent(this.timelineEl, "mousedown", () => {
+      this.suppressFocusDelegation = true;
+      // 万一「focus」が発火しないケース（すでにtimelineElへフォーカス済み等）に
+      // 備えて、フラグが残り続けないよう次のタスクでリセットしておく。
+      setTimeout(() => { this.suppressFocusDelegation = false; }, 0);
+    });
+
+    // Tabキーでコンテナ自身にフォーカスが入った瞬間: 直前にフォーカスしていた
+    // アイテムがあればそこへ、無ければ現在のスクロール位置に最も近いアイテムへ
+    // フォーカスを委譲する（focusイベントはbubbleしないため、ここではtimelineEl
+    // 自身がフォーカスされた場合のみ発火する＝ノード/Gap自身へのfocus()では発火しない）。
+    // ただし、マウス操作（クリック・右クリック）による場合は委譲しない。
+    // 委譲してしまうと、レーン背景の空白部分をクリックしただけで直近アイテムへ
+    // 勝手にスクロールし、右クリックメニューの表示位置がずれる等の問題が起きる。
+    this.registerDomEvent(this.timelineEl, "focus", () => {
+      if (this.suppressFocusDelegation) {
+        this.suppressFocusDelegation = false;
+        return;
+      }
+      if (this.focusSequence.length === 0) return;
+      let idx = this.focusSequence.findIndex(
+        (it) => it.type === this.focusedItemType && it.id === this.focusedItemId
+      );
+      if (idx === -1) idx = this.nearestFocusIndexToScroll();
+      this.moveFocusToIndex(idx);
+    });
+
+    // ↑/↓: 時系列順に1件移動、Home/End: 先頭/末尾へ移動
+    this.registerDomEvent(this.timelineEl, "keydown", (e: KeyboardEvent) => {
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          this.moveFocusBy(1);
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          this.moveFocusBy(-1);
+          break;
+        case "Home":
+          e.preventDefault();
+          this.moveFocusToIndex(0);
+          break;
+        case "End":
+          e.preventDefault();
+          this.moveFocusToIndex(this.focusSequence.length - 1);
+          break;
+      }
+    });
 
     // Esc → ノード間日数計測モードを中止
     this.registerDomEvent(document, "keydown", (e: KeyboardEvent) => {
@@ -599,6 +688,21 @@ export class TimelineView extends ItemView {
     const settings  = this.plugin.settings;
     const allEvents = this.eventStore.getAllSorted();
 
+    // 再描画のたびにSVG内の要素はすべて作り直される（TimelineRenderer.render()が
+    // 毎回丸ごと再構築する実装のため）。そのままではキーボードでフォーカス中の
+    // 要素も消えてしまい、フォーカスが失われる（特に、矢印キー移動時の自動スクロール
+    // がscrollイベント→scheduleRender()経由の再描画を誘発するケースで顕著）。
+    // 再描画直前に「フォーカス中の要素」を種別・IDで記録しておき、再描画後に
+    // 同じ対象（新しく作られたDOM要素）へfocus()し直すことでフォーカスを維持する。
+    const activeEl = document.activeElement;
+    let refocusTarget: FocusRef | null = null;
+    if (activeEl instanceof Element && this.zoomWrapperEl.contains(activeEl)) {
+      const eventId = activeEl.getAttribute("data-event-id");
+      const gapId   = activeEl.getAttribute("data-gap-id");
+      if (eventId)      refocusTarget = { type: "node", id: eventId };
+      else if (gapId)   refocusTarget = { type: "gap",  id: gapId };
+    }
+
     // エラーイベント（日付不正）は表示しない・Gap計算にも含めない
     const validEvents = allEvents.filter(e => !e.error);
 
@@ -624,6 +728,11 @@ export class TimelineView extends ItemView {
 
     // Step4: 確定した LayoutNode でGapの表示位置を更新する
     this.gapEngine.updateGapYPositions(this.gaps, this.nodes);
+
+    // 矢印キー移動用のフォーカスシーケンスを再構築する。
+    // 仮想描画の対象外（画面外）のノード・GAPも含めた全件から作る点が重要
+    // （this.nodes / this.gaps は仮想描画で間引かれる前の全件のため）。
+    this.focusSequence = this.buildFocusSequence();
 
     const totalWidth  = this.layoutEngine.calcTotalWidth(settings.laneCount);
     const totalHeight = this.layoutEngine.calcTotalHeight(this.nodes);
@@ -662,6 +771,13 @@ export class TimelineView extends ItemView {
       resolveNodeColors: (event) => this.plugin.colorPresetStore.resolve(event.color),
     });
 
+    // 再描画でDOM要素が作り直された後、記録しておいたフォーカス対象を復元する。
+    // （対象が仮想描画の範囲外になった等で見つからない場合は静かに諦める＝
+    //   focusRenderedItem() 内で存在チェック済み）
+    if (refocusTarget) {
+      this.focusRenderedItem(refocusTarget);
+    }
+
     // テーブルビューも最新データで更新（表示中かどうかに関わらず）
     const tableEvents = filtered.length < validEvents.length ? filtered : validEvents;
     this.tableView.render(
@@ -677,6 +793,114 @@ export class TimelineView extends ItemView {
 
     const t1 = performance.now();
     this.updateDebugOverlay(validEvents.length, this.nodes.length, this.gaps.length, t1 - t0);
+  }
+
+  // ----------------------------------------------------------
+  // 矢印キーによるフォーカス移動（仮想描画と両立するキーボード操作）
+  // ----------------------------------------------------------
+
+  /** ノード・GapをY座標（時系列）順に並べたフォーカス移動シーケンスを構築する */
+  private buildFocusSequence(): FocusItem[] {
+    const items: FocusItem[] = [];
+    for (const node of this.nodes) {
+      items.push({ type: "node", id: node.event.id, y: node.y, x: node.x });
+    }
+    for (const gap of this.gaps) {
+      // TimelineRenderer側のdata-gap-id（`${fromOrder}:${toOrder}`）と一致させる
+      items.push({ type: "gap", id: `${gap.fromOrder}:${gap.toOrder}`, y: gap.y, x: AXIS_X });
+    }
+    // Y座標（時系列）順。同Y（同日など）の場合はX座標順で安定させる。
+    items.sort((a, b) => a.y - b.y || a.x - b.x);
+    return items;
+  }
+
+  /** 現在のフォーカス位置から指定方向へ1件移動する。未フォーカス時は現在のスクロール位置に最も近い項目から開始する */
+  private moveFocusBy(direction: 1 | -1): void {
+    if (this.focusSequence.length === 0) return;
+    const currentIdx = this.focusSequence.findIndex(
+      (it) => it.type === this.focusedItemType && it.id === this.focusedItemId
+    );
+    const nextIdx = currentIdx === -1
+      ? this.nearestFocusIndexToScroll()
+      : Math.max(0, Math.min(this.focusSequence.length - 1, currentIdx + direction));
+    this.moveFocusToIndex(nextIdx);
+  }
+
+  /** 現在のスクロール位置（縦方向）に最も近いフォーカス項目のインデックスを返す */
+  private nearestFocusIndexToScroll(): number {
+    if (this.focusSequence.length === 0) return -1;
+    const zoomFactor = this.plugin.settings.boardZoom / 100;
+    const targetY = this.timelineEl.scrollTop / zoomFactor;
+    let best = 0;
+    let bestDiff = Infinity;
+    this.focusSequence.forEach((item, i) => {
+      const diff = Math.abs(item.y - targetY);
+      if (diff < bestDiff) { bestDiff = diff; best = i; }
+    });
+    return best;
+  }
+
+  /**
+   * 指定インデックスの項目へフォーカスを移動する。
+   * 画面外（仮想描画バッファの外）にある場合は自動スクロールしたうえで
+   * 同期的に再描画し、対応するDOM要素を探してフォーカスする。
+   * （scheduleRender()の50msデバウンスを待つとフォーカスが遅延・消失するため、
+   *   ここでは直接doRender()を呼ぶ）
+   */
+  private moveFocusToIndex(idx: number): void {
+    if (idx < 0 || idx >= this.focusSequence.length) return;
+    const item = this.focusSequence[idx];
+    this.focusedItemType = item.type;
+    this.focusedItemId   = item.id;
+
+    this.scrollFocusItemIntoView(item);
+    this.doRender();
+    this.focusRenderedItem(item);
+  }
+
+  /** 項目が現在の表示範囲外（固定ヘッダー・固定左列に隠れる位置も含む）にある場合のみスクロールする */
+  private scrollFocusItemIntoView(item: FocusItem): void {
+    const zoomFactor = this.plugin.settings.boardZoom / 100;
+    const margin      = 24;
+    // 上部の固定ヘッダー行・左側の固定列（年/月/GAP）は常に表示内容の一部を覆うため、
+    // その分を実効的な表示範囲から差し引いて計算する。
+    const headerPx  = HEADER_H       * zoomFactor;
+    const leftColPx = LANES_START_X  * zoomFactor;
+    const itemH     = 24 * zoomFactor; // ノード/Gapのおおよその縦幅（余裕を見た概算値）
+
+    const viewTop    = this.timelineEl.scrollTop;
+    const viewBottom = viewTop + this.timelineEl.clientHeight;
+    const itemTopPx    = item.y * zoomFactor;
+    const itemBottomPx = itemTopPx + itemH;
+
+    if (itemTopPx < viewTop + headerPx + margin) {
+      this.timelineEl.scrollTop = Math.max(0, itemTopPx - headerPx - margin);
+    } else if (itemBottomPx > viewBottom - margin) {
+      this.timelineEl.scrollTop = itemBottomPx - this.timelineEl.clientHeight + margin;
+    }
+
+    const viewLeft  = this.timelineEl.scrollLeft;
+    const viewRight = viewLeft + this.timelineEl.clientWidth;
+    const itemXPx = item.x * zoomFactor;
+
+    if (itemXPx < viewLeft + leftColPx + margin) {
+      this.timelineEl.scrollLeft = Math.max(0, itemXPx - leftColPx - margin);
+    } else if (itemXPx > viewRight - margin) {
+      this.timelineEl.scrollLeft = itemXPx - this.timelineEl.clientWidth + margin;
+    }
+  }
+
+  /** 再描画後のDOMから対象要素を探してフォーカスする */
+  private focusRenderedItem(item: FocusRef): void {
+    const selector = item.type === "node"
+      ? `[data-event-id="${CSS.escape(item.id)}"]`
+      : `[data-gap-id="${CSS.escape(item.id)}"]`;
+    const el = this.zoomWrapperEl.querySelector<SVGElement & { focus?: () => void }>(selector);
+    // スクロール直後で仮想描画のバッファ計算上、稀に対象が生成されない場合があるため
+    // 要素の存在チェックを行う（例外にせず静かに諦める）
+    if (el && typeof el.focus === "function") {
+      el.focus({ preventScroll: true });
+    }
   }
 
   // ----------------------------------------------------------

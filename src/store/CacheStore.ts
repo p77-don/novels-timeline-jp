@@ -9,6 +9,40 @@ import { TimelineCache, CacheEntry } from "../types/TimelineTypes";
 // 正しいパス（.obsidian/plugins/... が正式なObsidianプラグインデータ置き場）
 const CACHE_PATH = ".obsidian/plugins/novels-timeline-jp/timeline-cache.json";
 
+/**
+ * JSON.parse() の戻り値（unknown相当）を検証し、正しい形の TimelineCache を返す。
+ * - entries がオブジェクトでない場合（null / 配列 / プリミティブ等）は空に補正
+ * - 各エントリも order:number, date:string を満たすものだけ採用し、それ以外は破棄する
+ * これにより、壊れたキャッシュファイルによる setEntry() / getEntry() での
+ * 例外発生（更新・再描画の停止）を防ぐ。
+ */
+function sanitizeCache(raw: unknown): TimelineCache {
+  if (!raw || typeof raw !== "object") {
+    return { generatedAt: 0, entries: {} };
+  }
+
+  const obj = raw as Record<string, unknown>;
+  const generatedAt = typeof obj.generatedAt === "number" && Number.isFinite(obj.generatedAt)
+    ? obj.generatedAt
+    : 0;
+
+  const entriesRaw = obj.entries;
+  const entries: Record<string, CacheEntry> = {};
+
+  if (entriesRaw && typeof entriesRaw === "object" && !Array.isArray(entriesRaw)) {
+    for (const [id, value] of Object.entries(entriesRaw as Record<string, unknown>)) {
+      if (!value || typeof value !== "object") continue;
+      const v = value as Record<string, unknown>;
+      if (typeof v.order === "number" && Number.isFinite(v.order) && typeof v.date === "string") {
+        entries[id] = { order: v.order, date: v.date };
+      }
+      // 形が合わないエントリは黙って破棄する（不正な1件のために全体を捨てない）
+    }
+  }
+
+  return { generatedAt, entries };
+}
+
 export class CacheStore {
   private app: App;
   private cache: TimelineCache = { generatedAt: 0, entries: {} };
@@ -22,7 +56,7 @@ export class CacheStore {
       const adapter = this.app.vault.adapter;
       if (await adapter.exists(CACHE_PATH)) {
         const raw = await adapter.read(CACHE_PATH);
-        this.cache = JSON.parse(raw) as TimelineCache;
+        this.cache = sanitizeCache(JSON.parse(raw));
       }
     } catch {
       this.cache = { generatedAt: 0, entries: {} };
