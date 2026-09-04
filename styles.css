@@ -306,7 +306,11 @@
 }
 .ntj-gap:focus-visible {
   outline: 2px solid var(--interactive-accent);
-  outline-offset: 2px;
+  /* GAPカードは列の境界いっぱいまで幅を使うことがあるため、
+     正のoutline-offsetだと枠が隣のレーン列へはみ出してしまう。
+     負のoffset（内側描画）にすることで、要素の見た目の範囲内に
+     必ず収まるようにする。 */
+  outline-offset: -2px;
   border-radius: 6px;
 }
 

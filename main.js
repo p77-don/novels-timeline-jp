@@ -2838,14 +2838,16 @@ var GapRenderer = class {
    * @param gapColW    GAP専用列の幅（axisXから右に確保された帯の幅）
    * @param slotHeight このGapに割り当てられた縦幅（Layout側の配置高さと一致させる）。
    *                   カードの縦幅はこの範囲を超えないようにする（GAP同士の重なり防止）。
-   *                   カードの横幅は常にGAP列の幅に収まるようクランプし、
-   *                   文字が収まらない場合はフォントサイズを縮小して対応する。
+   *                   カードの横幅は常にGAP列の幅（左右にOUTER_MARGIN分の余白を確保）に
+   *                   収まるようクランプし、文字が収まらない場合はフォントサイズを縮小、
+   *                   それでも収まらない場合は `textLength` で描画幅そのものを強制する。
    */
   render(gap, axisX, gapColW, slotHeight) {
     const g = document.createElementNS(SVG_NS, "g");
     g.setAttribute("class", "ntj-gap");
     const y = gap.y;
-    const cardX = axisX + gapColW / 2 + 4;
+    const OUTER_MARGIN = 6;
+    const cardX = axisX + gapColW / 2;
     const iconId = gap.expanded ? "chevrons-down-up" : "chevrons-up-down";
     const labelText = gap.label;
     const PADDING = 10;
@@ -2853,11 +2855,12 @@ var GapRenderer = class {
     const ICON_GAP = 3;
     const minFont = 7;
     const maxFont = 11;
-    const labelW = Math.max(28, gapColW - 8);
+    const labelW = Math.max(28, gapColW - OUTER_MARGIN * 2);
     const charWidthRatio = 0.62;
+    const availableTextW = Math.max(10, labelW - PADDING - ICON_SIZE - ICON_GAP);
     let fontSize = Math.min(
       maxFont,
-      (labelW - PADDING - ICON_SIZE - ICON_GAP) / Math.max(1, labelText.length) / charWidthRatio
+      availableTextW / Math.max(1, labelText.length) / charWidthRatio
     );
     fontSize = Math.max(minFont, fontSize);
     const labelH = Math.min(22, Math.max(14, slotHeight - 4));
@@ -2913,8 +2916,9 @@ var GapRenderer = class {
     highlight.setAttribute("fill", "var(--background-primary)");
     highlight.setAttribute("fill-opacity", "0.5");
     g.appendChild(highlight);
-    const textWidthEstimate = labelText.length * fontSize * charWidthRatio;
-    const groupWidth = ICON_SIZE + ICON_GAP + textWidthEstimate;
+    const estimatedTextWidth = labelText.length * fontSize * charWidthRatio;
+    const renderTextWidth = Math.min(estimatedTextWidth, availableTextW);
+    const groupWidth = ICON_SIZE + ICON_GAP + renderTextWidth;
     const groupStartX = cardX - groupWidth / 2;
     const icon = (0, import_obsidian2.getIcon)(iconId);
     if (icon) {
@@ -2933,6 +2937,10 @@ var GapRenderer = class {
     text.setAttribute("font-size", String(fontSize.toFixed(1)));
     text.setAttribute("font-weight", "500");
     text.setAttribute("fill", "var(--text-muted)");
+    if (estimatedTextWidth > availableTextW) {
+      text.setAttribute("textLength", String(renderTextWidth.toFixed(1)));
+      text.setAttribute("lengthAdjust", "spacingAndGlyphs");
+    }
     text.textContent = labelText;
     g.appendChild(text);
     return g;

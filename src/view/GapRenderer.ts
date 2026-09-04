@@ -16,15 +16,21 @@ export class GapRenderer {
    * @param gapColW    GAP専用列の幅（axisXから右に確保された帯の幅）
    * @param slotHeight このGapに割り当てられた縦幅（Layout側の配置高さと一致させる）。
    *                   カードの縦幅はこの範囲を超えないようにする（GAP同士の重なり防止）。
-   *                   カードの横幅は常にGAP列の幅に収まるようクランプし、
-   *                   文字が収まらない場合はフォントサイズを縮小して対応する。
+   *                   カードの横幅は常にGAP列の幅（左右にOUTER_MARGIN分の余白を確保）に
+   *                   収まるようクランプし、文字が収まらない場合はフォントサイズを縮小、
+   *                   それでも収まらない場合は `textLength` で描画幅そのものを強制する。
    */
   render(gap: GapSegment, axisX: number, gapColW: number, slotHeight: number): SVGGElement {
     const g = document.createElementNS(SVG_NS, "g") as SVGGElement;
     g.setAttribute("class", "ntj-gap");
 
     const y          = gap.y; // gap.y は実体としてSVG Y座標
-    const cardX       = axisX + gapColW / 2 + 4; // GAP列の中央よりやや右（レーン寄り）
+    // カードは列の中央に配置する。以前は「+4」で隣のレーン列側へ寄せていたが、
+    // その分だけカード右端が列境界（＝レーン1列の開始位置）ちょうどに達してしまい、
+    // フォーカス枠（outline-offset分）が隣のレーン列へはみ出す原因になっていた。
+    // 列境界の両側に必ず OUTER_MARGIN 分の余白を確保する。
+    const OUTER_MARGIN = 6; // 列境界とカード端の最小余白(px)。フォーカス枠の食い込み防止も兼ねる。
+    const cardX       = axisX + gapColW / 2;
     // 圧縮中（クリックで展開できる）: chevrons-up-down
     // 展開中（クリックで圧縮できる）: chevrons-down-up
     const iconId      = gap.expanded ? "chevrons-down-up" : "chevrons-up-down";
@@ -36,11 +42,13 @@ export class GapRenderer {
     const ICON_GAP    = 3; // アイコンとテキストの間隔
     const minFont     = 7;
     const maxFont     = 11;
-    const labelW      = Math.max(28, gapColW - 8); // 列の左右にわずかな余白
-    const charWidthRatio = 0.62; // フォントサイズに対するおおよその1文字幅
+    const labelW      = Math.max(28, gapColW - OUTER_MARGIN * 2);
+    const charWidthRatio = 0.62; // フォントサイズに対するおおよその1文字幅（目安。誤差はtextLengthで吸収する）
+    // 利用可能なテキスト描画幅（アイコン・パディングを除いたカード内側の幅）
+    const availableTextW = Math.max(10, labelW - PADDING - ICON_SIZE - ICON_GAP);
     let fontSize = Math.min(
       maxFont,
-      (labelW - PADDING - ICON_SIZE - ICON_GAP) / Math.max(1, labelText.length) / charWidthRatio
+      availableTextW / Math.max(1, labelText.length) / charWidthRatio
     );
     fontSize = Math.max(minFont, fontSize);
 
@@ -110,8 +118,16 @@ export class GapRenderer {
     g.appendChild(highlight);
 
     // ── アイコン + テキスト（カード内で中央寄せしたグループとして配置） ──
-    const textWidthEstimate = labelText.length * fontSize * charWidthRatio;
-    const groupWidth = ICON_SIZE + ICON_GAP + textWidthEstimate;
+    // 文字幅の推定（charWidthRatio）は全角（年・か月・日等）と半角数字が混在する
+    // ラベルに対しては誤差が出やすく、日数が大きく桁数の多いラベル
+    // （例:「12年10か月29日」）だと実際の描画幅が推定より広くなり、
+    // カード・GAP列の外へテキストがはみ出すことがあった。
+    // 推定幅が使用可能幅を超える場合は availableTextW にクランプし、
+    // SVGの `textLength` 属性で実際の描画幅を強制的にその値へ合わせることで、
+    // 推定誤差に関わらずカード内に収まることを保証する。
+    const estimatedTextWidth = labelText.length * fontSize * charWidthRatio;
+    const renderTextWidth    = Math.min(estimatedTextWidth, availableTextW);
+    const groupWidth = ICON_SIZE + ICON_GAP + renderTextWidth;
     const groupStartX = cardX - groupWidth / 2;
 
     const icon = getIcon(iconId);
@@ -132,6 +148,12 @@ export class GapRenderer {
     text.setAttribute("font-size",         String(fontSize.toFixed(1)));
     text.setAttribute("font-weight",       "500");
     text.setAttribute("fill",              "var(--text-muted)");
+    // 実描画幅を renderTextWidth に固定し、カード外へのはみ出しを防ぐ安全弁。
+    // 推定幅が使用可能幅に収まっている場合は自然な字間のまま描画されるよう省略する。
+    if (estimatedTextWidth > availableTextW) {
+      text.setAttribute("textLength",  String(renderTextWidth.toFixed(1)));
+      text.setAttribute("lengthAdjust", "spacingAndGlyphs");
+    }
     text.textContent = labelText;
     g.appendChild(text);
 
