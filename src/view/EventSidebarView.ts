@@ -11,11 +11,12 @@
 
 import { ItemView, WorkspaceLeaf, Notice, normalizePath } from "obsidian";
 import type NovelsTimelinePlugin from "../main";
-import { TimelineEvent, ColorPreset } from "../types/TimelineTypes";
+import { TimelineEvent, ColorPreset, EventSize } from "../types/TimelineTypes";
 import { DateParser } from "../parser/DateParser";
 import { NTJP_KEYS } from "../parser/TimelineParser";
 import { ColorPresetModal } from "./ColorPresetModal";
 import { ConfirmModal } from "./ConfirmModal";
+import { RelatedEventModal } from "./RelatedEventModal";
 
 export const EVENT_SIDEBAR_VIEW_TYPE = "novels-timeline-jp-sidebar";
 
@@ -30,13 +31,28 @@ export type SidebarMode =
 const INVALID_FILENAME_CHARS = /[\\/:*?"<>|[\]]/;
 
 /** 関連イベント選択リストで使う軽量な一覧アイテム */
-interface EventListItem {
+export interface EventListItem {
   id: string;
   displayTitle: string;
   /** yyyy/m/d 形式の表示用日付ラベル */
   dateLabel: string;
   /** ソート用の内部時系列値（DateParser.parse().timelineOrder） */
   timelineOrder: number;
+  /** 年月フィルタ用（date が不正で解析できなかった場合は undefined） */
+  year?: number;
+  month?: number;
+  /** レーン番号フィルタ用 */
+  lane: number;
+  /** ノードサイズフィルタ用 */
+  size: EventSize;
+  /** 配色セットIDまたはレガシーHEX値（NTJP_colors の生値） */
+  colorId: string;
+  /** キーワード検索対象（登場人物） */
+  characters: string[];
+  /** キーワード検索対象（場所） */
+  locations: string[];
+  /** キーワード検索対象（概要） */
+  summary?: string;
 }
 
 export class EventSidebarView extends ItemView {
@@ -311,6 +327,21 @@ export class EventSidebarView extends ItemView {
     const dateParser = new DateParser(this.plugin.settings.calendar);
     const items: EventListItem[] = [];
 
+    // NTJP_characters / NTJP_locations は配列・単一文字列いずれの保存形式も許容する
+    // （TimelineParser.parseStringArray と同等の簡易実装。フィルタ・検索用の
+    // 軽量読み取りのみが目的なので、ここでは TimelineParser 本体には依存しない）。
+    const toStringArray = (value: unknown): string[] => {
+      if (!value) return [];
+      if (Array.isArray(value)) {
+        return value
+          .filter((v) => v !== null && v !== undefined)
+          .map((v) => String(v).trim())
+          .filter((v) => v !== "");
+      }
+      if (typeof value === "string" && value.trim() !== "") return [value.trim()];
+      return [];
+    };
+
     for (const file of vault.getMarkdownFiles()) {
       const fm = metadataCache.getFileCache(file)?.frontmatter;
       if (!fm || fm[NTJP_KEYS.date] === undefined) continue;
@@ -327,11 +358,37 @@ export class EventSidebarView extends ItemView {
       const timelineOrder = parsed.ok ? parsed.timelineOrder : Number.POSITIVE_INFINITY;
       const dateLabel      = parsed.ok ? dateParser.formatSlash(parsed.parsed) : dateStr;
 
+      // レーン番号（不正・未設定値は 1 扱い。フィルタ用の軽量読み取りのため
+      // TimelineParser 側の範囲クランプ（1〜laneCount）とは独立している）
+      const laneNum = Number(fm[NTJP_KEYS.lane]);
+      const lane = Number.isFinite(laneNum) ? Math.round(laneNum) : 1;
+
+      // ノードサイズ
+      const nodeRaw = fm[NTJP_KEYS.node];
+      const size: EventSize = nodeRaw === "small" || nodeRaw === "big" ? nodeRaw : "medium";
+
+      // 配色セットID（またはレガシーHEX値）
+      const colorRaw = fm[NTJP_KEYS.colors];
+      const colorId = typeof colorRaw === "string" ? colorRaw.trim() : "";
+
+      // 概要
+      const summaryRaw = fm[NTJP_KEYS.summary];
+      const summary =
+        typeof summaryRaw === "string" && summaryRaw.trim() !== "" ? summaryRaw.trim() : undefined;
+
       items.push({
         id: file.basename,
         displayTitle,
         dateLabel,
         timelineOrder,
+        year:  parsed.ok ? parsed.parsed.year  : undefined,
+        month: parsed.ok ? parsed.parsed.month : undefined,
+        lane,
+        size,
+        colorId,
+        characters: toStringArray(fm[NTJP_KEYS.characters]),
+        locations:  toStringArray(fm[NTJP_KEYS.locations]),
+        summary,
       });
     }
 
@@ -379,41 +436,53 @@ export class EventSidebarView extends ItemView {
     for (const linkId of currentLinks) {
       this.addLinkItem(listEl, linkId, eventById);
     }
+    this.refreshLinkListEmptyState(listEl);
 
-    // 追加ボタン行
-    const addRow = field.createDiv({ cls: "ntj-sf-link-add-row" });
-    const select = addRow.createEl("select", { cls: "ntj-sf-input ntj-sf-link-select" });
-    select.id = `${prefix}-link-select`;
+    // --------------------------------------------------------
+    // 「関連イベント登録」ボタン
+    //
+    // イベント数が多いVaultでは候補が数百〜数千件になり得るため、
+    // サイドバーへ巨大な <select> を直接置かず、モーダル
+    // （RelatedEventModal）を起動して「絞り込み・選択・追加」を
+    // 完結させる。サイドバー側は「登録済みの関連イベント一覧＋削除」
+    // のみを持つ。
+    // --------------------------------------------------------
+    const openBtn = field.createEl("button", { cls: "ntj-sf-btn ntj-sf-link-open-btn", text: "関連イベント追加" });
+    openBtn.addEventListener("click", () => {
+      // 現在すでに登録済みのIDは候補から除外する（モーダル内で重複表示・重複追加させないため）
+      const existingIds = new Set(
+        Array.from(listEl.querySelectorAll(".ntj-sf-link-id"))
+          .map((e) => (e as HTMLElement).dataset.id ?? "")
+          .filter(Boolean)
+      );
+      const candidates = allEvents.filter((e) => !existingIds.has(e.id));
 
-    const placeholder = select.createEl("option", { text: "▼イベントを選択" });
-    placeholder.value = "";
-    placeholder.disabled = true;
-    placeholder.selected = true;
-
-    // 日付（時系列）順で列挙する
-    for (const e of allEvents) {
-      const label = `${e.dateLabel}  ${e.displayTitle}`;
-      const o = select.createEl("option", { text: label });
-      o.value = e.id;
-    }
-
-    const addBtn = addRow.createEl("button", { cls: "ntj-sf-btn", text: "追加" });
-    addBtn.addEventListener("click", () => {
-      const val = select.value;
-      if (!val) return;
-      // 重複チェック
-      const existing = Array.from(listEl.querySelectorAll(".ntj-sf-link-id"))
-        .map(e => (e as HTMLElement).dataset.id ?? "");
-      if (existing.includes(val)) {
-        new Notice(`「${val}」はすでに追加されています`);
-        return;
-      }
-      this.addLinkItem(listEl, val, eventById);
-      select.value = "";
+      new RelatedEventModal(
+        this.app,
+        candidates,
+        this.plugin.settings.calendar,
+        this.plugin.settings.laneCount,
+        this.plugin.colorPresetStore.getAll(),
+        (ids) => {
+          for (const id of ids) {
+            this.addLinkItem(listEl, id, eventById);
+          }
+          this.refreshLinkListEmptyState(listEl);
+        }
+      ).open();
     });
   }
 
+  /** 関連イベント一覧が空のとき、案内文を表示する */
+  private refreshLinkListEmptyState(listEl: HTMLElement): void {
+    listEl.querySelector(".ntj-sf-link-empty")?.remove();
+    if (listEl.querySelectorAll(".ntj-sf-link-item").length === 0) {
+      listEl.createEl("p", { cls: "ntj-sf-link-empty", text: "登録されている関連イベントはありません。" });
+    }
+  }
+
   private addLinkItem(listEl: HTMLElement, linkId: string, eventById: Map<string, EventListItem>): void {
+    listEl.querySelector(".ntj-sf-link-empty")?.remove();
     const item = listEl.createDiv({ cls: "ntj-sf-link-item" });
 
     const matched = eventById.get(linkId);
@@ -429,7 +498,10 @@ export class EventSidebarView extends ItemView {
     }
 
     const delBtn = item.createEl("button", { cls: "ntj-sf-link-del", text: "✕" });
-    delBtn.addEventListener("click", () => item.remove());
+    delBtn.addEventListener("click", () => {
+      item.remove();
+      this.refreshLinkListEmptyState(listEl);
+    });
   }
 
   /** リンクリストから現在の選択値を取得 */

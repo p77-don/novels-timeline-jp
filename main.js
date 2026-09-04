@@ -26,7 +26,7 @@ __export(main_exports, {
   default: () => NovelsTimelinePlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian9 = require("obsidian");
+var import_obsidian10 = require("obsidian");
 
 // src/settings/PluginSettings.ts
 var DEFAULT_CALENDAR = {
@@ -94,6 +94,9 @@ function calcCumulativeDaysBeforeMonth(calendar, monthNum) {
 }
 function getMonthDef(calendar, monthNum) {
   return calendar.months.find((m) => m.month === monthNum);
+}
+function getMonthCount(calendar) {
+  return calendar.months.length;
 }
 function cloneDefaultCalendar() {
   return JSON.parse(JSON.stringify(DEFAULT_CALENDAR));
@@ -4703,7 +4706,7 @@ var TimelineView = class extends import_obsidian4.ItemView {
 };
 
 // src/view/EventSidebarView.ts
-var import_obsidian7 = require("obsidian");
+var import_obsidian8 = require("obsidian");
 
 // src/view/ColorPresetModal.ts
 var import_obsidian6 = require("obsidian");
@@ -5023,10 +5026,163 @@ var ColorPresetModal = class extends import_obsidian6.Modal {
   }
 };
 
+// src/view/RelatedEventModal.ts
+var import_obsidian7 = require("obsidian");
+var SIZE_OPTIONS = [
+  ["small", "\u5C0F"],
+  ["medium", "\u4E2D\uFF08\u6A19\u6E96\uFF09"],
+  ["big", "\u5927"]
+];
+var RelatedEventModal = class extends import_obsidian7.Modal {
+  constructor(app, candidates, calendar, laneCount, colorPresets, onAdd) {
+    super(app);
+    this.candidates = candidates;
+    this.calendar = calendar;
+    this.laneCount = laneCount;
+    this.colorPresets = colorPresets;
+    this.onAdd = onAdd;
+    /** チェック済みイベントID */
+    this.selected = /* @__PURE__ */ new Set();
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("ntj-related-modal");
+    contentEl.createEl("h2", { text: "\u95A2\u9023\u30A4\u30D9\u30F3\u30C8\u3092\u9078\u629E" });
+    if (this.candidates.length === 0) {
+      contentEl.createEl("p", {
+        cls: "ntj-preset-empty",
+        text: "\u8FFD\u52A0\u3067\u304D\u308B\u30A4\u30D9\u30F3\u30C8\u304C\u3042\u308A\u307E\u305B\u3093\uFF08\u4ED6\u306B\u767B\u9332\u53EF\u80FD\u306A\u30A4\u30D9\u30F3\u30C8\u304C\u5B58\u5728\u3057\u306A\u3044\u304B\u3001\u3059\u3079\u3066\u8FFD\u52A0\u6E08\u307F\u3067\u3059\uFF09\u3002"
+      });
+      const closeRow = contentEl.createDiv({ cls: "ntj-sf-btn-row" });
+      closeRow.createEl("button", { cls: "ntj-sf-btn", text: "\u9589\u3058\u308B" }).addEventListener("click", () => this.close());
+      return;
+    }
+    contentEl.createEl("p", {
+      cls: "ntj-related-modal-desc",
+      text: "\u5E74\u30FB\u6708\u30FB\u30EC\u30FC\u30F3\u30FB\u30B5\u30A4\u30BA\u30FB\u914D\u8272\u30BB\u30C3\u30C8\u3084\u30AD\u30FC\u30EF\u30FC\u30C9\uFF08\u30BF\u30A4\u30C8\u30EB\uFF0F\u767B\u5834\u4EBA\u7269\uFF0F\u5834\u6240\uFF0F\u6982\u8981\uFF09\u3067\u7D5E\u308A\u8FBC\u307F\u3001\u8FFD\u52A0\u3057\u305F\u3044\u30A4\u30D9\u30F3\u30C8\u306B\u30C1\u30A7\u30C3\u30AF\u3092\u4ED8\u3051\u3066\u300C\u8FFD\u52A0\u300D\u3092\u62BC\u3057\u3066\u304F\u3060\u3055\u3044\uFF08\u8907\u6570\u9078\u629E\u53EF\uFF09\u3002"
+    });
+    const filterRow1 = contentEl.createDiv({ cls: "ntj-sf-link-filter-row" });
+    const yearSelect = filterRow1.createEl("select", { cls: "ntj-sf-input ntj-sf-link-filter-select" });
+    const monthSelect = filterRow1.createEl("select", { cls: "ntj-sf-input ntj-sf-link-filter-select" });
+    const keywordInput = filterRow1.createEl("input", { cls: "ntj-sf-input ntj-sf-link-filter-text" });
+    keywordInput.type = "text";
+    keywordInput.placeholder = "\u30BF\u30A4\u30C8\u30EB\u30FB\u767B\u5834\u4EBA\u7269\u30FB\u5834\u6240\u30FB\u6982\u8981\u3067\u7D5E\u308A\u8FBC\u307F\u2026";
+    const years = Array.from(
+      new Set(this.candidates.map((e) => e.year).filter((y) => y !== void 0))
+    ).sort((a, b) => a - b);
+    const yearAll = yearSelect.createEl("option", { text: "\u5E74\uFF1A\u3059\u3079\u3066" });
+    yearAll.value = "";
+    for (const y of years) {
+      yearSelect.createEl("option", { text: `${y}\u5E74` }).value = String(y);
+    }
+    const monthCount = getMonthCount(this.calendar);
+    const monthAll = monthSelect.createEl("option", { text: "\u6708\uFF1A\u3059\u3079\u3066" });
+    monthAll.value = "";
+    for (let m = 1; m <= monthCount; m++) {
+      const def = getMonthDef(this.calendar, m);
+      const label = (def == null ? void 0 : def.name) ? `${m}\u6708\uFF08${def.name}\uFF09` : `${m}\u6708`;
+      monthSelect.createEl("option", { text: label }).value = String(m);
+    }
+    const filterRow2 = contentEl.createDiv({ cls: "ntj-sf-link-filter-row" });
+    const laneSelect = filterRow2.createEl("select", { cls: "ntj-sf-input ntj-sf-link-filter-select" });
+    const sizeSelect = filterRow2.createEl("select", { cls: "ntj-sf-input ntj-sf-link-filter-select" });
+    const colorSelect = filterRow2.createEl("select", { cls: "ntj-sf-input ntj-sf-link-filter-select" });
+    const laneAll = laneSelect.createEl("option", { text: "\u30EC\u30FC\u30F3\uFF1A\u3059\u3079\u3066" });
+    laneAll.value = "";
+    for (let l = 1; l <= this.laneCount; l++) {
+      laneSelect.createEl("option", { text: `\u30EC\u30FC\u30F3${l}` }).value = String(l);
+    }
+    const sizeAll = sizeSelect.createEl("option", { text: "\u30B5\u30A4\u30BA\uFF1A\u3059\u3079\u3066" });
+    sizeAll.value = "";
+    for (const [v, label] of SIZE_OPTIONS) {
+      sizeSelect.createEl("option", { text: label }).value = v;
+    }
+    const colorAll = colorSelect.createEl("option", { text: "\u914D\u8272\uFF1A\u3059\u3079\u3066" });
+    colorAll.value = "";
+    for (const p of this.colorPresets) {
+      colorSelect.createEl("option", { text: p.name }).value = p.id;
+    }
+    const countEl = contentEl.createDiv({ cls: "ntj-sf-link-filter-count" });
+    const listEl = contentEl.createDiv({ cls: "ntj-related-modal-list" });
+    const btnRow = contentEl.createDiv({ cls: "ntj-sf-btn-row" });
+    const cancelBtn = btnRow.createEl("button", { cls: "ntj-sf-btn", text: "\u30AD\u30E3\u30F3\u30BB\u30EB" });
+    const addBtn = btnRow.createEl("button", { cls: "ntj-sf-btn ntj-sf-btn-primary", text: "\u8FFD\u52A0" });
+    const updateAddBtn = () => {
+      addBtn.setText(this.selected.size > 0 ? `\u8FFD\u52A0\uFF08${this.selected.size}\u4EF6\uFF09` : "\u8FFD\u52A0");
+      addBtn.disabled = this.selected.size === 0;
+    };
+    const renderList = () => {
+      const yearVal = yearSelect.value;
+      const monthVal = monthSelect.value;
+      const laneVal = laneSelect.value;
+      const sizeVal = sizeSelect.value;
+      const colorVal = colorSelect.value;
+      const keyword = keywordInput.value.trim().toLowerCase();
+      const filtered = this.candidates.filter((e) => {
+        var _a, _b, _c;
+        if (yearVal !== "" && String((_a = e.year) != null ? _a : "") !== yearVal) return false;
+        if (monthVal !== "" && String((_b = e.month) != null ? _b : "") !== monthVal) return false;
+        if (laneVal !== "" && String(e.lane) !== laneVal) return false;
+        if (sizeVal !== "" && e.size !== sizeVal) return false;
+        if (colorVal !== "" && e.colorId !== colorVal) return false;
+        if (keyword) {
+          const haystack = [
+            e.displayTitle,
+            ...e.characters,
+            ...e.locations,
+            (_c = e.summary) != null ? _c : ""
+          ].join(" ").toLowerCase();
+          if (!haystack.includes(keyword)) return false;
+        }
+        return true;
+      });
+      listEl.empty();
+      if (filtered.length === 0) {
+        listEl.createEl("p", { cls: "ntj-preset-empty", text: "\u8A72\u5F53\u3059\u308B\u30A4\u30D9\u30F3\u30C8\u304C\u3042\u308A\u307E\u305B\u3093\u3002" });
+      }
+      for (const e of filtered) {
+        const row = listEl.createDiv({ cls: "ntj-related-modal-row" });
+        const label = row.createEl("label", { cls: "ntj-related-modal-row-label" });
+        const cb = label.createEl("input", { type: "checkbox", cls: "ntj-related-modal-row-cb" });
+        cb.checked = this.selected.has(e.id);
+        cb.addEventListener("change", () => {
+          if (cb.checked) this.selected.add(e.id);
+          else this.selected.delete(e.id);
+          updateAddBtn();
+        });
+        label.createSpan({ cls: "ntj-related-modal-row-date", text: e.dateLabel });
+        label.createSpan({ cls: "ntj-related-modal-row-title", text: e.displayTitle });
+      }
+      countEl.setText(
+        filtered.length === this.candidates.length ? `${this.candidates.length}\u4EF6` : `${filtered.length} / ${this.candidates.length}\u4EF6`
+      );
+    };
+    yearSelect.addEventListener("change", renderList);
+    monthSelect.addEventListener("change", renderList);
+    laneSelect.addEventListener("change", renderList);
+    sizeSelect.addEventListener("change", renderList);
+    colorSelect.addEventListener("change", renderList);
+    keywordInput.addEventListener("input", renderList);
+    cancelBtn.addEventListener("click", () => this.close());
+    addBtn.addEventListener("click", () => {
+      if (this.selected.size === 0) return;
+      this.onAdd(Array.from(this.selected));
+      this.close();
+    });
+    updateAddBtn();
+    renderList();
+    keywordInput.focus();
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+
 // src/view/EventSidebarView.ts
 var EVENT_SIDEBAR_VIEW_TYPE = "novels-timeline-jp-sidebar";
 var INVALID_FILENAME_CHARS = /[\\/:*?"<>|[\]]/;
-var EventSidebarView = class extends import_obsidian7.ItemView {
+var EventSidebarView = class extends import_obsidian8.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.mode = { type: "idle" };
@@ -5272,6 +5428,14 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
     const { vault, metadataCache } = this.plugin.app;
     const dateParser = new DateParser(this.plugin.settings.calendar);
     const items = [];
+    const toStringArray = (value) => {
+      if (!value) return [];
+      if (Array.isArray(value)) {
+        return value.filter((v) => v !== null && v !== void 0).map((v) => String(v).trim()).filter((v) => v !== "");
+      }
+      if (typeof value === "string" && value.trim() !== "") return [value.trim()];
+      return [];
+    };
     for (const file of vault.getMarkdownFiles()) {
       const fm = (_a = metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
       if (!fm || fm[NTJP_KEYS.date] === void 0) continue;
@@ -5281,11 +5445,27 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
       const parsed = dateParser.parse(dateStr);
       const timelineOrder = parsed.ok ? parsed.timelineOrder : Number.POSITIVE_INFINITY;
       const dateLabel = parsed.ok ? dateParser.formatSlash(parsed.parsed) : dateStr;
+      const laneNum = Number(fm[NTJP_KEYS.lane]);
+      const lane = Number.isFinite(laneNum) ? Math.round(laneNum) : 1;
+      const nodeRaw = fm[NTJP_KEYS.node];
+      const size = nodeRaw === "small" || nodeRaw === "big" ? nodeRaw : "medium";
+      const colorRaw = fm[NTJP_KEYS.colors];
+      const colorId = typeof colorRaw === "string" ? colorRaw.trim() : "";
+      const summaryRaw = fm[NTJP_KEYS.summary];
+      const summary = typeof summaryRaw === "string" && summaryRaw.trim() !== "" ? summaryRaw.trim() : void 0;
       items.push({
         id: file.basename,
         displayTitle,
         dateLabel,
-        timelineOrder
+        timelineOrder,
+        year: parsed.ok ? parsed.parsed.year : void 0,
+        month: parsed.ok ? parsed.parsed.month : void 0,
+        lane,
+        size,
+        colorId,
+        characters: toStringArray(fm[NTJP_KEYS.characters]),
+        locations: toStringArray(fm[NTJP_KEYS.locations]),
+        summary
       });
     }
     return items;
@@ -5322,35 +5502,42 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
     for (const linkId of currentLinks) {
       this.addLinkItem(listEl, linkId, eventById);
     }
-    const addRow = field.createDiv({ cls: "ntj-sf-link-add-row" });
-    const select = addRow.createEl("select", { cls: "ntj-sf-input ntj-sf-link-select" });
-    select.id = `${prefix}-link-select`;
-    const placeholder = select.createEl("option", { text: "\u25BC\u30A4\u30D9\u30F3\u30C8\u3092\u9078\u629E" });
-    placeholder.value = "";
-    placeholder.disabled = true;
-    placeholder.selected = true;
-    for (const e of allEvents) {
-      const label = `${e.dateLabel}  ${e.displayTitle}`;
-      const o = select.createEl("option", { text: label });
-      o.value = e.id;
-    }
-    const addBtn = addRow.createEl("button", { cls: "ntj-sf-btn", text: "\u8FFD\u52A0" });
-    addBtn.addEventListener("click", () => {
-      const val = select.value;
-      if (!val) return;
-      const existing = Array.from(listEl.querySelectorAll(".ntj-sf-link-id")).map((e) => {
-        var _a;
-        return (_a = e.dataset.id) != null ? _a : "";
-      });
-      if (existing.includes(val)) {
-        new import_obsidian7.Notice(`\u300C${val}\u300D\u306F\u3059\u3067\u306B\u8FFD\u52A0\u3055\u308C\u3066\u3044\u307E\u3059`);
-        return;
-      }
-      this.addLinkItem(listEl, val, eventById);
-      select.value = "";
+    this.refreshLinkListEmptyState(listEl);
+    const openBtn = field.createEl("button", { cls: "ntj-sf-btn ntj-sf-link-open-btn", text: "\u95A2\u9023\u30A4\u30D9\u30F3\u30C8\u8FFD\u52A0" });
+    openBtn.addEventListener("click", () => {
+      const existingIds = new Set(
+        Array.from(listEl.querySelectorAll(".ntj-sf-link-id")).map((e) => {
+          var _a;
+          return (_a = e.dataset.id) != null ? _a : "";
+        }).filter(Boolean)
+      );
+      const candidates = allEvents.filter((e) => !existingIds.has(e.id));
+      new RelatedEventModal(
+        this.app,
+        candidates,
+        this.plugin.settings.calendar,
+        this.plugin.settings.laneCount,
+        this.plugin.colorPresetStore.getAll(),
+        (ids) => {
+          for (const id of ids) {
+            this.addLinkItem(listEl, id, eventById);
+          }
+          this.refreshLinkListEmptyState(listEl);
+        }
+      ).open();
     });
   }
+  /** 関連イベント一覧が空のとき、案内文を表示する */
+  refreshLinkListEmptyState(listEl) {
+    var _a;
+    (_a = listEl.querySelector(".ntj-sf-link-empty")) == null ? void 0 : _a.remove();
+    if (listEl.querySelectorAll(".ntj-sf-link-item").length === 0) {
+      listEl.createEl("p", { cls: "ntj-sf-link-empty", text: "\u767B\u9332\u3055\u308C\u3066\u3044\u308B\u95A2\u9023\u30A4\u30D9\u30F3\u30C8\u306F\u3042\u308A\u307E\u305B\u3093\u3002" });
+    }
+  }
   addLinkItem(listEl, linkId, eventById) {
+    var _a;
+    (_a = listEl.querySelector(".ntj-sf-link-empty")) == null ? void 0 : _a.remove();
     const item = listEl.createDiv({ cls: "ntj-sf-link-item" });
     const matched = eventById.get(linkId);
     const displayText = matched ? `${matched.dateLabel}  ${matched.displayTitle}` : linkId;
@@ -5361,7 +5548,10 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
       item.createSpan({ cls: "ntj-sf-link-warn", text: " \u26A0 \u5B58\u5728\u3057\u306A\u3044\u30A4\u30D9\u30F3\u30C8" });
     }
     const delBtn = item.createEl("button", { cls: "ntj-sf-link-del", text: "\u2715" });
-    delBtn.addEventListener("click", () => item.remove());
+    delBtn.addEventListener("click", () => {
+      item.remove();
+      this.refreshLinkListEmptyState(listEl);
+    });
   }
   /** リンクリストから現在の選択値を取得 */
   getLinksFromList(listId) {
@@ -5392,7 +5582,7 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
     const links = this.getLinksFromList("ntj-f-links-list");
     const errs = this.validateAll({ title, dateRaw, laneStr, colorVal });
     if (errs.length > 0) {
-      new import_obsidian7.Notice(errs.join("\n"));
+      new import_obsidian8.Notice(errs.join("\n"));
       return;
     }
     const date = DateParser.normalizeFullWidth(dateRaw);
@@ -5422,7 +5612,7 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
     const links = this.getLinksFromList("ntj-e-links-list");
     const errs = this.validateAll({ title, dateRaw, laneStr, colorVal });
     if (errs.length > 0) {
-      new import_obsidian7.Notice(errs.join("\n"));
+      new import_obsidian8.Notice(errs.join("\n"));
       return;
     }
     const date = DateParser.normalizeFullWidth(dateRaw);
@@ -5430,7 +5620,7 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
     const color = colorVal || "#808080";
     const file = this.plugin.app.vault.getFileByPath(event.filePath);
     if (!file) {
-      new import_obsidian7.Notice("\u30D5\u30A1\u30A4\u30EB\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
+      new import_obsidian8.Notice("\u30D5\u30A1\u30A4\u30EB\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
       return;
     }
     try {
@@ -5450,16 +5640,16 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
       const oldBaseName = file.basename;
       const prefix = (_r = (_q = oldBaseName.match(/^(\d+)-/)) == null ? void 0 : _q[1]) != null ? _r : "";
       const newBaseName = prefix ? `${prefix}-${title}` : title;
-      const newFullPath = (0, import_obsidian7.normalizePath)(
+      const newFullPath = (0, import_obsidian8.normalizePath)(
         file.parent ? `${file.parent.path}/${newBaseName}.md` : `${newBaseName}.md`
       );
       if (newBaseName !== oldBaseName) {
         await this.plugin.app.fileManager.renameFile(file, newFullPath);
       }
-      new import_obsidian7.Notice("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
+      new import_obsidian8.Notice("\u4FDD\u5B58\u3057\u307E\u3057\u305F");
       this.closeLeaf();
     } catch (e) {
-      new import_obsidian7.Notice(`\u4FDD\u5B58\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${e.message}`);
+      new import_obsidian8.Notice(`\u4FDD\u5B58\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${e.message}`);
     }
   }
   // ----------------------------------------------------------
@@ -5504,7 +5694,7 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
   async openEventNote(event) {
     const file = this.plugin.app.vault.getFileByPath(event.filePath);
     if (!file) {
-      new import_obsidian7.Notice("\u30D5\u30A1\u30A4\u30EB\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
+      new import_obsidian8.Notice("\u30D5\u30A1\u30A4\u30EB\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
       return;
     }
     const leaf = this.plugin.app.workspace.getLeaf("tab");
@@ -5523,15 +5713,15 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
     if (!confirmed) return;
     const file = this.plugin.app.vault.getFileByPath(event.filePath);
     if (!file) {
-      new import_obsidian7.Notice("\u30D5\u30A1\u30A4\u30EB\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
+      new import_obsidian8.Notice("\u30D5\u30A1\u30A4\u30EB\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
       return;
     }
     try {
       await this.plugin.app.vault.trash(file, true);
-      new import_obsidian7.Notice(`\u524A\u9664\u3057\u307E\u3057\u305F: ${event.displayTitle}`);
+      new import_obsidian8.Notice(`\u524A\u9664\u3057\u307E\u3057\u305F: ${event.displayTitle}`);
       this.closeLeaf();
     } catch (e) {
-      new import_obsidian7.Notice(`\u524A\u9664\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${e.message}`);
+      new import_obsidian8.Notice(`\u524A\u9664\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${e.message}`);
     }
   }
   // ----------------------------------------------------------
@@ -5542,8 +5732,8 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
     const nextNumber = this.getNextFileNumber();
     const padded = String(nextNumber).padStart(4, "0");
     const fileName = `${padded}-${params.title}.md`;
-    const folder = params.folder ? (0, import_obsidian7.normalizePath)(params.folder) : "";
-    const fullPath = (0, import_obsidian7.normalizePath)(folder ? `${folder}/${fileName}` : fileName);
+    const folder = params.folder ? (0, import_obsidian8.normalizePath)(params.folder) : "";
+    const fullPath = (0, import_obsidian8.normalizePath)(folder ? `${folder}/${fileName}` : fileName);
     if (folder) {
       if (!vault.getAbstractFileByPath(folder)) {
         try {
@@ -5570,10 +5760,10 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
 `;
     try {
       await vault.create(fullPath, content);
-      new import_obsidian7.Notice(`\u4F5C\u6210\u3057\u307E\u3057\u305F: ${fullPath}`);
+      new import_obsidian8.Notice(`\u4F5C\u6210\u3057\u307E\u3057\u305F: ${fullPath}`);
       return true;
     } catch (e) {
-      new import_obsidian7.Notice(`\u4F5C\u6210\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${e.message}`);
+      new import_obsidian8.Notice(`\u4F5C\u6210\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${e.message}`);
       return false;
     }
   }
@@ -5698,8 +5888,8 @@ var EventSidebarView = class extends import_obsidian7.ItemView {
 };
 
 // src/settings/SettingsTab.ts
-var import_obsidian8 = require("obsidian");
-var NovelsTimelineSettingTab = class extends import_obsidian8.PluginSettingTab {
+var import_obsidian9 = require("obsidian");
+var NovelsTimelineSettingTab = class extends import_obsidian9.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -5729,7 +5919,7 @@ var NovelsTimelineSettingTab = class extends import_obsidian8.PluginSettingTab {
           setting.addText(
             (text) => text.setPlaceholder("\u4F8B: events / stories/chapter1").setValue(this.plugin.settings.newEventFolder).onChange(async (value) => {
               const trimmed = value.trim();
-              this.plugin.settings.newEventFolder = trimmed ? (0, import_obsidian8.normalizePath)(trimmed) : "";
+              this.plugin.settings.newEventFolder = trimmed ? (0, import_obsidian9.normalizePath)(trimmed) : "";
               await this.plugin.saveSettings();
             })
           );
@@ -5741,7 +5931,7 @@ var NovelsTimelineSettingTab = class extends import_obsidian8.PluginSettingTab {
         render: (setting) => {
           setting.addText(
             (text) => text.setPlaceholder("Templates, Archive, Trash").setValue(this.plugin.settings.excludedFolders.join(", ")).onChange(async (value) => {
-              this.plugin.settings.excludedFolders = value.split(",").map((s) => s.trim()).filter((s) => s !== "").map((s) => (0, import_obsidian8.normalizePath)(s));
+              this.plugin.settings.excludedFolders = value.split(",").map((s) => s.trim()).filter((s) => s !== "").map((s) => (0, import_obsidian9.normalizePath)(s));
               await this.plugin.saveSettings();
               this.plugin.notifySettingsChanged();
             })
@@ -5929,9 +6119,9 @@ var NovelsTimelineSettingTab = class extends import_obsidian8.PluginSettingTab {
               const view = this.plugin.getTimelineView();
               if (view) {
                 await view.rebuildAll();
-                new import_obsidian8.Notice("\u30AD\u30E3\u30C3\u30B7\u30E5\u3092\u518D\u69CB\u7BC9\u3057\u307E\u3057\u305F");
+                new import_obsidian9.Notice("\u30AD\u30E3\u30C3\u30B7\u30E5\u3092\u518D\u69CB\u7BC9\u3057\u307E\u3057\u305F");
               } else {
-                new import_obsidian8.Notice("\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u30D3\u30E5\u30FC\u304C\u958B\u3044\u3066\u3044\u307E\u305B\u3093");
+                new import_obsidian9.Notice("\u30BF\u30A4\u30E0\u30E9\u30A4\u30F3\u30D3\u30E5\u30FC\u304C\u958B\u3044\u3066\u3044\u307E\u305B\u3093");
               }
             }
           }
@@ -5940,7 +6130,7 @@ var NovelsTimelineSettingTab = class extends import_obsidian8.PluginSettingTab {
     ];
   }
 };
-var CalendarSettingsPage = class extends import_obsidian8.SettingPage {
+var CalendarSettingsPage = class extends import_obsidian9.SettingPage {
   constructor(plugin) {
     super();
     this.plugin = plugin;
@@ -5954,7 +6144,7 @@ var CalendarSettingsPage = class extends import_obsidian8.SettingPage {
       cls: "setting-item-description"
     });
     const calendar = this.plugin.settings.calendar;
-    new import_obsidian8.Setting(containerEl).setName("\u66A6\u306E\u540D\u524D").setDesc("\u8868\u793A\u7528\uFF08\u4EFB\u610F\uFF09").addText(
+    new import_obsidian9.Setting(containerEl).setName("\u66A6\u306E\u540D\u524D").setDesc("\u8868\u793A\u7528\uFF08\u4EFB\u610F\uFF09").addText(
       (text) => text.setValue(calendar.name).onChange(async (value) => {
         this.plugin.settings.calendar.name = value;
         await this.plugin.saveSettings();
@@ -5962,7 +6152,7 @@ var CalendarSettingsPage = class extends import_obsidian8.SettingPage {
       })
     );
     this.buildCalendarTable(containerEl, calendar);
-    new import_obsidian8.Setting(containerEl).setName("\u6708\u3092\u8FFD\u52A0").setDesc("\u66A6\u306B\u6708\u3092\u8FFD\u52A0\u3057\u307E\u3059").addButton(
+    new import_obsidian9.Setting(containerEl).setName("\u6708\u3092\u8FFD\u52A0").setDesc("\u66A6\u306B\u6708\u3092\u8FFD\u52A0\u3057\u307E\u3059").addButton(
       (btn) => btn.setButtonText("\uFF0B \u6708\u3092\u8FFD\u52A0").onClick(async () => {
         const months = this.plugin.settings.calendar.months;
         const nextMonth = months.length + 1;
@@ -5972,7 +6162,7 @@ var CalendarSettingsPage = class extends import_obsidian8.SettingPage {
         this.display();
       })
     );
-    new import_obsidian8.Setting(containerEl).setName("\u30C7\u30D5\u30A9\u30EB\u30C8\u66A6\u306B\u623B\u3059").setDesc("\u66A6\u540D\u3092\u300C\u897F\u66A6\u300D\u3001\u6708\u540D\u3092\u672A\u8A2D\u5B9A\u306B\u30EA\u30BB\u30C3\u30C8\u3057\u307E\u3059").addButton(
+    new import_obsidian9.Setting(containerEl).setName("\u30C7\u30D5\u30A9\u30EB\u30C8\u66A6\u306B\u623B\u3059").setDesc("\u66A6\u540D\u3092\u300C\u897F\u66A6\u300D\u3001\u6708\u540D\u3092\u672A\u8A2D\u5B9A\u306B\u30EA\u30BB\u30C3\u30C8\u3057\u307E\u3059").addButton(
       (btn) => btn.setButtonText("\u30EA\u30BB\u30C3\u30C8").setDestructive().onClick(async () => {
         this.plugin.settings.calendar = cloneDefaultCalendar();
         await this.plugin.saveSettings();
@@ -6032,7 +6222,7 @@ var CalendarSettingsPage = class extends import_obsidian8.SettingPage {
     }
     delBtn.addEventListener("click", async () => {
       if (months.length <= 1) {
-        new import_obsidian8.Notice("\u66A6\u306B\u306F\u6700\u4F4E1\u304B\u6708\u304C\u5FC5\u8981\u3067\u3059\u3002\u3053\u308C\u4EE5\u4E0A\u524A\u9664\u3067\u304D\u307E\u305B\u3093\u3002");
+        new import_obsidian9.Notice("\u66A6\u306B\u306F\u6700\u4F4E1\u304B\u6708\u304C\u5FC5\u8981\u3067\u3059\u3002\u3053\u308C\u4EE5\u4E0A\u524A\u9664\u3067\u304D\u307E\u305B\u3093\u3002");
         return;
       }
       months.splice(index, 1);
@@ -6047,7 +6237,7 @@ var CalendarSettingsPage = class extends import_obsidian8.SettingPage {
 };
 
 // src/main.ts
-var NovelsTimelinePlugin = class extends import_obsidian9.Plugin {
+var NovelsTimelinePlugin = class extends import_obsidian10.Plugin {
   async onload() {
     await this.loadSettings();
     this.colorPresetStore = new ColorPresetStore(this.app);
@@ -6075,7 +6265,7 @@ var NovelsTimelinePlugin = class extends import_obsidian9.Plugin {
         const view = this.getTimelineView();
         if (view) {
           await view.rebuildAll();
-          new import_obsidian9.Notice("\u30AD\u30E3\u30C3\u30B7\u30E5\u3092\u518D\u69CB\u7BC9\u3057\u307E\u3057\u305F");
+          new import_obsidian10.Notice("\u30AD\u30E3\u30C3\u30B7\u30E5\u3092\u518D\u69CB\u7BC9\u3057\u307E\u3057\u305F");
         }
       }
     });
