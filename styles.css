@@ -146,9 +146,7 @@
   pointer-events: none;
 }
 
-.ntj-node:hover rect,
-.ntj-node:hover ellipse,
-.ntj-node:hover polygon {
+.ntj-node:hover circle {
   filter: brightness(1.2);
 }
 

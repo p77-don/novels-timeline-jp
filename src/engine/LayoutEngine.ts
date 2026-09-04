@@ -41,15 +41,36 @@ export const LANES_START_X = YEAR_COL_W + MONTH_COL_W + GAP_COL_W;
 /** 時間軸（縦線）のSVG X座標 — 月列とGAP列の境界に配置する */
 export const AXIS_X = YEAR_COL_W + MONTH_COL_W;
 
+// ============================================================
+// ノードサイズ調整用の定数
+// 見た目（円の大きさ・日にちラベルの文字サイズ）を調整したいときは、
+// このブロックの値だけを変更すればよい。
+// ============================================================
+
+/**
+ * 「小」ノードの半径(px)。中・大サイズの半径や、日にちラベルが収まる
+ * 内側の円の大きさも、すべてこの値を基準に算出される。
+ */
+export const NODE_BASE_RADIUS = 13;
+
 /**
  * サイズ倍率（小=1 を基準に、中=1.5倍、大=2倍）。
- * ノードの時間軸方向(Y)の半径はこの倍率で決まる。
+ * 各サイズの外側リング半径は NODE_BASE_RADIUS × この倍率で決まる。
  */
-const SIZE_MULTIPLIER: Record<string, number> = {
+export const NODE_SIZE_MULTIPLIER: Record<string, number> = {
   small: 1, medium: 1.5, big: 2,
 };
-/** 「小」サイズにおける基準半径(px)（等倍のとき） */
-const BASE_UNIT_HALF_HEIGHT = 8;
+
+/** 日にちラベル（例:"23日"）のフォントサイズ(px)。 */
+export const NODE_LABEL_FONT_SIZE = 9;
+
+/**
+ * 日にちラベルとノード円の縁との最小余白(px)。
+ * ラベルの推定描画幅がこの余白を確保できない場合、SVGの `textLength` で
+ * 実際の描画幅を強制的に縮め、円からのはみ出しを防ぐ（TimelineRenderer側で使用）。
+ */
+export const NODE_LABEL_PADDING = 3;
+
 /** タイムライン開始Y座標(px) — 上部ヘッダーと重ならないよう余白を確保 */
 const START_Y                = HEADER_H + 20;
 const MIN_Y_GAP               = 46;  // 隣接イベント間の最小Y間隔(px)
@@ -83,15 +104,66 @@ export function dayLabelForEvent(event: TimelineEvent): string {
   return `${day}日`;
 }
 
-export function estimateNodeFontSize(radius: number): number {
-  return Math.max(9, Math.min(22, radius * 1.15));
+/**
+ * 同心円の1枚を表す（半径と不透明度）。
+ * nodeRingsForSize() は「外側（大きい・薄い）→内側（小さい・濃い）」の順で返す。
+ */
+export interface NodeRing {
+  r: number;
+  opacity: number;
 }
 
-/** ノード（日にちバッジ）の描画幅(px)を見積もる（レーン列内でのクランプ前の理想値） */
-export function estimateNodePillWidth(event: TimelineEvent, radius: number): number {
-  const text     = dayLabelForEvent(event);
-  const fontSize = estimateNodeFontSize(radius);
-  return text.length * fontSize * 0.62 + fontSize * 0.9;
+/**
+ * 「小」ノードの半径(px)。日にちラベルの文字サイズは、ノード自体の
+ * サイズ区分（小/中/大）に関わらず、常にこの半径を基準に一定とする
+ * （中・大は外側にリングを重ねるだけで、内側の円＝ラベルの土台は
+ *   「小」と同じ大きさのまま）。
+ */
+export function baseNodeRadius(): number {
+  return NODE_BASE_RADIUS * NODE_SIZE_MULTIPLIER.small;
+}
+
+/**
+ * サイズ区分ごとの同心円リング定義を返す（外側→内側の順）。
+ *   小 (small)  : 単円のみ                          → 一重丸
+ *   中 (medium) : 「中」相当の大きさの円(不透明度75%)を
+ *                 「小」の円(不透明度100%)の下に重ねる → 二重丸
+ *   大 (big)    : さらに「大」相当の大きさの円(不透明度50%)を
+ *                 一番下に重ねる                      → 三重丸
+ * 内側（最後の要素）の半径は常に baseNodeRadius() と一致する。
+ * 外側の円の半径は、そのサイズ区分の従来の半径（calcRadius）と一致するため、
+ * レーン方向・時間軸方向の占有幅（node.radius）は変更しない。
+ */
+export function nodeRingsForSize(size: string): NodeRing[] {
+  const rSmall  = NODE_BASE_RADIUS * NODE_SIZE_MULTIPLIER.small;
+  const rMedium = NODE_BASE_RADIUS * NODE_SIZE_MULTIPLIER.medium;
+  const rBig    = NODE_BASE_RADIUS * NODE_SIZE_MULTIPLIER.big;
+
+  if (size === "big") {
+    return [
+      { r: rBig,    opacity: 0.4 },
+      { r: rMedium, opacity: 0.6 },
+      { r: rSmall,  opacity: 1 },
+    ];
+  }
+  if (size === "small") {
+    return [{ r: rSmall, opacity: 1 }];
+  }
+  // medium、および未知の値は medium 扱い（calcRadius のフォールバックに合わせる）
+  return [
+    { r: rMedium, opacity: 0.75 },
+    { r: rSmall,  opacity: 1 },
+  ];
+}
+
+/**
+ * 日にちラベルのフォントサイズ(px)。
+ * ノードは常に「小」の内接円（baseNodeRadius）にラベルを収める設計のため、
+ * サイズ区分によらず NODE_LABEL_FONT_SIZE の値を返す。
+ * （文字がはみ出す場合はRenderer側で `textLength` により描画幅を強制的に収める）
+ */
+export function estimateNodeFontSize(): number {
+  return NODE_LABEL_FONT_SIZE;
 }
 
 export class LayoutEngine {
@@ -312,8 +384,8 @@ export class LayoutEngine {
   }
 
   calcRadius(size: string): number {
-    const multiplier = SIZE_MULTIPLIER[size] ?? SIZE_MULTIPLIER["medium"];
-    return BASE_UNIT_HALF_HEIGHT * multiplier;
+    const multiplier = NODE_SIZE_MULTIPLIER[size] ?? NODE_SIZE_MULTIPLIER["medium"];
+    return NODE_BASE_RADIUS * multiplier;
   }
 
   /**

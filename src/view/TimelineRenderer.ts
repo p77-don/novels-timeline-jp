@@ -24,7 +24,7 @@ import { NovelsTimelineSettings } from "../settings/PluginSettings";
 import { Tooltip }     from "./Tooltip";
 import { GapRenderer } from "./GapRenderer";
 import { TimelineEvent } from "../types/TimelineTypes";
-import { LANE_MIN, LANE_COL_W, HEADER_H, YEAR_COL_W, MONTH_COL_W, GAP_COL_W, LANES_START_X, AXIS_X, GAP_SLOT_HEIGHT, EXPANDED_MIN_HEIGHT, EXPANDED_PX_PER_DAY, dayLabelForEvent, estimateNodeFontSize, estimateNodePillWidth } from "../engine/LayoutEngine";
+import { LANE_MIN, LANE_COL_W, HEADER_H, YEAR_COL_W, MONTH_COL_W, GAP_COL_W, LANES_START_X, AXIS_X, GAP_SLOT_HEIGHT, EXPANDED_MIN_HEIGHT, EXPANDED_PX_PER_DAY, dayLabelForEvent, estimateNodeFontSize, nodeRingsForSize, baseNodeRadius, NODE_LABEL_PADDING } from "../engine/LayoutEngine";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -511,7 +511,9 @@ export class TimelineRenderer {
     ctx: RenderContext, visTop: number, visBottom: number, visLeft: number, visRight: number
   ): void {
     for (const node of ctx.nodes) {
-      const w = this.estimateClampedPillWidth(node);
+      // ノードは真円になったため、当たり判定・カリング用の幅は
+      // 外側リング（node.radius）の直径と一致する。
+      const w = node.radius * 2;
       const h = node.radius * 2;
       // ノードは中心(node.x)がレーン列の中心。上端(node.y)が時間軸の起点で、
       // そこから下方向へh分だけ描画される。
@@ -528,15 +530,8 @@ export class TimelineRenderer {
     return dayLabelForEvent(node.event);
   }
 
-  private estimateFontSize(node: LayoutNode): number {
-    return estimateNodeFontSize(node.radius);
-  }
-
-  /** レーン列幅にクランプしたノード横幅(px) */
-  private estimateClampedPillWidth(node: LayoutNode): number {
-    const raw = estimateNodePillWidth(node.event, node.radius);
-    const maxW = LANE_COL_W - 8; // レーン列の左右にわずかな余白を残す
-    return Math.min(raw, Math.max(16, maxW));
+  private estimateFontSize(): number {
+    return estimateNodeFontSize();
   }
 
   /** ノードの視覚上の中心Y座標（関係線・ホバー基準などに使用） */
@@ -545,70 +540,46 @@ export class TimelineRenderer {
   }
 
   /**
-   * サイズ別のノード形状を生成する（縦軸方向に長さを持つ）。
-   *   小 (small)  : 長方形
-   *   中 (medium) : 楕円形
-   *   大 (big)    : 横長の六角形（左右が尖る）
+   * サイズ別のノード形状を生成する（同心円）。
+   *   小 (small)  : 単円のみ                      → 一重丸
+   *   中 (medium) : 「小」の円の下に、一回り大きい円
+   *                 （不透明度75%）を重ねる         → 二重丸
+   *   大 (big)    : さらにもう一回り大きい円
+   *                 （不透明度50%）を一番下に重ねる  → 三重丸
+   * サイズが大きくなるほど円の数が増えるだけでなく、内側に向かって
+   * 不透明度が高くなることで、遠目にも大小を判別しやすくしている。
    *
    * @param cx      ノード中心のSVG X座標（レーン列の中心）
    * @param topY    ノード上端のSVG Y座標（時間軸上の日付起点）
-   * @param w       ノード全体の幅(px)
-   * @param h       ノード全体の高さ(px)
    */
   private buildNodeShape(
-    size: string, cx: number, topY: number, w: number, h: number,
-    fill: string, fillOpacity: string, stroke: string, strokeWidth: string
-  ): SVGElement {
-    const halfW = w / 2;
+    size: string, cx: number, topY: number, outerRadius: number,
+    fill: string, isFiltered: boolean, isSelected: boolean
+  ): SVGGElement {
+    const g = document.createElementNS(SVG_NS, "g") as SVGGElement;
+    const cy = topY + outerRadius; // 上端 + 外側リング半径 = 円群全体の中心Y
 
-    if (size === "small") {
-      // 長方形
-      const rect = document.createElementNS(SVG_NS, "rect");
-      rect.setAttribute("x",      String(cx - halfW));
-      rect.setAttribute("y",      String(topY));
-      rect.setAttribute("width",  String(w));
-      rect.setAttribute("height", String(h));
-      rect.setAttribute("rx",     "1.5");
-      this.applyShapeStyle(rect, fill, fillOpacity, stroke, strokeWidth);
-      return rect;
-    }
+    const rings = nodeRingsForSize(size);
+    rings.forEach((ring, index) => {
+      const circle = document.createElementNS(SVG_NS, "circle");
+      circle.setAttribute("cx", String(cx));
+      circle.setAttribute("cy", String(cy));
+      circle.setAttribute("r",  String(ring.r));
+      circle.setAttribute("fill", fill);
+      circle.setAttribute("fill-opacity", String(isFiltered ? ring.opacity * 0.25 : ring.opacity));
+      // 選択中の強調枠は、一番外側のリング（＝サイズ全体の輪郭）にのみ付ける
+      const isOutermost = index === 0;
+      if (isOutermost && isSelected) {
+        circle.setAttribute("stroke",       COLOR.nodeStroke);
+        circle.setAttribute("stroke-width", "2.5");
+      } else {
+        circle.setAttribute("stroke",       "none");
+        circle.setAttribute("stroke-width", "0");
+      }
+      g.appendChild(circle);
+    });
 
-    if (size === "big") {
-      // 横長の六角形（左右が尖り、上下辺の左右端に切り欠きを設ける）
-      const halfH  = h / 2;
-      const midY   = topY + halfH;
-      const notch  = Math.min(halfH * 0.7, w / 3);
-      const points = [
-        `${cx - halfW + notch},${topY}`,
-        `${cx + halfW - notch},${topY}`,
-        `${cx + halfW},${midY}`,
-        `${cx + halfW - notch},${topY + h}`,
-        `${cx - halfW + notch},${topY + h}`,
-        `${cx - halfW},${midY}`,
-      ].join(" ");
-      const hex = document.createElementNS(SVG_NS, "polygon");
-      hex.setAttribute("points", points);
-      this.applyShapeStyle(hex, fill, fillOpacity, stroke, strokeWidth);
-      return hex;
-    }
-
-    // medium: 楕円形
-    const ellipse = document.createElementNS(SVG_NS, "ellipse");
-    ellipse.setAttribute("cx", String(cx));
-    ellipse.setAttribute("cy", String(topY + h / 2));
-    ellipse.setAttribute("rx", String(halfW));
-    ellipse.setAttribute("ry", String(h / 2));
-    this.applyShapeStyle(ellipse, fill, fillOpacity, stroke, strokeWidth);
-    return ellipse;
-  }
-
-  private applyShapeStyle(
-    el: SVGElement, fill: string, fillOpacity: string, stroke: string, strokeWidth: string
-  ): void {
-    el.setAttribute("fill",         fill);
-    el.setAttribute("fill-opacity", fillOpacity);
-    el.setAttribute("stroke",       stroke);
-    el.setAttribute("stroke-width", strokeWidth);
+    return g;
   }
 
   private drawNode(
@@ -629,19 +600,17 @@ export class TimelineRenderer {
     g.setAttribute("aria-label", node.event.displayTitle || node.event.date || "イベント");
 
     const text     = this.dayLabel(node);
-    const fontSize = this.estimateFontSize(node);
-    const w        = this.estimateClampedPillWidth(node);
+    const fontSize = this.estimateFontSize();
     const h        = node.radius * 2;
-    const centerY  = node.y + h / 2;
+    const w        = h; // 真円になったため、幅=高さ=外側リングの直径
+    const centerY  = node.y + node.radius;
     const colors   = ctx.resolveNodeColors(node.event);
 
     // ノードの上端(node.y)が時間軸上の日付起点と一致するように描画する
     const shape = this.buildNodeShape(
-      node.event.size, node.x, node.y, w, h,
+      node.event.size, node.x, node.y, node.radius,
       isFiltered ? COLOR.nodeFiltered : colors.nodeColor,
-      isFiltered ? "0.25" : "1",
-      isSelected ? COLOR.nodeStroke : "none",
-      isSelected ? "2.5" : "0"
+      isFiltered, isSelected
     );
     g.appendChild(shape);
 
@@ -655,6 +624,16 @@ export class TimelineRenderer {
       label.setAttribute("font-size",         String(fontSize));
       label.setAttribute("font-weight",       "600");
       label.setAttribute("fill",              colors.textColor || COLOR.nodeTextLight);
+      // 日にちラベルは常に「小」の内接円（baseNodeRadius）に収める設計。
+      // 文字幅の推定には誤差が出うる（全角「日」等と半角数字が混在するため）ので、
+      // 推定幅が円からはみ出す場合のみ `textLength` で実際の描画幅を強制的にクランプする
+      // 安全弁を設ける（GapRendererの日数ラベルと同様の手法）。
+      const availableTextW = Math.max(6, baseNodeRadius() * 2 - NODE_LABEL_PADDING * 2);
+      const estimatedTextWidth = text.length * fontSize * 0.62 + fontSize * 0.3;
+      if (estimatedTextWidth > availableTextW) {
+        label.setAttribute("textLength",  String(availableTextW.toFixed(1)));
+        label.setAttribute("lengthAdjust", "spacingAndGlyphs");
+      }
       label.textContent = text;
       g.appendChild(label);
     }

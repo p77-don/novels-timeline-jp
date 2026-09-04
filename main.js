@@ -731,12 +731,14 @@ var MONTH_COL_W = 64;
 var GAP_COL_W = 80;
 var LANES_START_X = YEAR_COL_W + MONTH_COL_W + GAP_COL_W;
 var AXIS_X = YEAR_COL_W + MONTH_COL_W;
-var SIZE_MULTIPLIER = {
+var NODE_BASE_RADIUS = 13;
+var NODE_SIZE_MULTIPLIER = {
   small: 1,
   medium: 1.5,
   big: 2
 };
-var BASE_UNIT_HALF_HEIGHT = 8;
+var NODE_LABEL_FONT_SIZE = 9;
+var NODE_LABEL_PADDING = 3;
 var START_Y = HEADER_H + 20;
 var MIN_Y_GAP = 46;
 var Y_SCALE = 4;
@@ -751,13 +753,30 @@ function dayLabelForEvent(event) {
   const day = match ? match[1] : "?";
   return `${day}\u65E5`;
 }
-function estimateNodeFontSize(radius) {
-  return Math.max(9, Math.min(22, radius * 1.15));
+function baseNodeRadius() {
+  return NODE_BASE_RADIUS * NODE_SIZE_MULTIPLIER.small;
 }
-function estimateNodePillWidth(event, radius) {
-  const text = dayLabelForEvent(event);
-  const fontSize = estimateNodeFontSize(radius);
-  return text.length * fontSize * 0.62 + fontSize * 0.9;
+function nodeRingsForSize(size) {
+  const rSmall = NODE_BASE_RADIUS * NODE_SIZE_MULTIPLIER.small;
+  const rMedium = NODE_BASE_RADIUS * NODE_SIZE_MULTIPLIER.medium;
+  const rBig = NODE_BASE_RADIUS * NODE_SIZE_MULTIPLIER.big;
+  if (size === "big") {
+    return [
+      { r: rBig, opacity: 0.4 },
+      { r: rMedium, opacity: 0.6 },
+      { r: rSmall, opacity: 1 }
+    ];
+  }
+  if (size === "small") {
+    return [{ r: rSmall, opacity: 1 }];
+  }
+  return [
+    { r: rMedium, opacity: 0.75 },
+    { r: rSmall, opacity: 1 }
+  ];
+}
+function estimateNodeFontSize() {
+  return NODE_LABEL_FONT_SIZE;
 }
 var LayoutEngine = class {
   constructor(calendar) {
@@ -910,8 +929,8 @@ var LayoutEngine = class {
   }
   calcRadius(size) {
     var _a;
-    const multiplier = (_a = SIZE_MULTIPLIER[size]) != null ? _a : SIZE_MULTIPLIER["medium"];
-    return BASE_UNIT_HALF_HEIGHT * multiplier;
+    const multiplier = (_a = NODE_SIZE_MULTIPLIER[size]) != null ? _a : NODE_SIZE_MULTIPLIER["medium"];
+    return NODE_BASE_RADIUS * multiplier;
   }
   /**
    * クリック位置(ビューポートY)から日付文字列を逆算する。
@@ -3297,7 +3316,7 @@ var TimelineRenderer = class {
   // ----------------------------------------------------------
   drawNodes(ctx, visTop, visBottom, visLeft, visRight) {
     for (const node of ctx.nodes) {
-      const w = this.estimateClampedPillWidth(node);
+      const w = node.radius * 2;
       const h = node.radius * 2;
       if (node.y + h < visTop || node.y > visBottom) continue;
       if (node.x + w / 2 < visLeft || node.x - w / 2 > visRight) continue;
@@ -3310,72 +3329,48 @@ var TimelineRenderer = class {
   dayLabel(node) {
     return dayLabelForEvent(node.event);
   }
-  estimateFontSize(node) {
-    return estimateNodeFontSize(node.radius);
-  }
-  /** レーン列幅にクランプしたノード横幅(px) */
-  estimateClampedPillWidth(node) {
-    const raw = estimateNodePillWidth(node.event, node.radius);
-    const maxW = LANE_COL_W - 8;
-    return Math.min(raw, Math.max(16, maxW));
+  estimateFontSize() {
+    return estimateNodeFontSize();
   }
   /** ノードの視覚上の中心Y座標（関係線・ホバー基準などに使用） */
   nodeCenterY(node) {
     return node.y + node.radius;
   }
   /**
-   * サイズ別のノード形状を生成する（縦軸方向に長さを持つ）。
-   *   小 (small)  : 長方形
-   *   中 (medium) : 楕円形
-   *   大 (big)    : 横長の六角形（左右が尖る）
+   * サイズ別のノード形状を生成する（同心円）。
+   *   小 (small)  : 単円のみ                      → 一重丸
+   *   中 (medium) : 「小」の円の下に、一回り大きい円
+   *                 （不透明度75%）を重ねる         → 二重丸
+   *   大 (big)    : さらにもう一回り大きい円
+   *                 （不透明度50%）を一番下に重ねる  → 三重丸
+   * サイズが大きくなるほど円の数が増えるだけでなく、内側に向かって
+   * 不透明度が高くなることで、遠目にも大小を判別しやすくしている。
    *
    * @param cx      ノード中心のSVG X座標（レーン列の中心）
    * @param topY    ノード上端のSVG Y座標（時間軸上の日付起点）
-   * @param w       ノード全体の幅(px)
-   * @param h       ノード全体の高さ(px)
    */
-  buildNodeShape(size, cx, topY, w, h, fill, fillOpacity, stroke, strokeWidth) {
-    const halfW = w / 2;
-    if (size === "small") {
-      const rect = document.createElementNS(SVG_NS2, "rect");
-      rect.setAttribute("x", String(cx - halfW));
-      rect.setAttribute("y", String(topY));
-      rect.setAttribute("width", String(w));
-      rect.setAttribute("height", String(h));
-      rect.setAttribute("rx", "1.5");
-      this.applyShapeStyle(rect, fill, fillOpacity, stroke, strokeWidth);
-      return rect;
-    }
-    if (size === "big") {
-      const halfH = h / 2;
-      const midY = topY + halfH;
-      const notch = Math.min(halfH * 0.7, w / 3);
-      const points = [
-        `${cx - halfW + notch},${topY}`,
-        `${cx + halfW - notch},${topY}`,
-        `${cx + halfW},${midY}`,
-        `${cx + halfW - notch},${topY + h}`,
-        `${cx - halfW + notch},${topY + h}`,
-        `${cx - halfW},${midY}`
-      ].join(" ");
-      const hex = document.createElementNS(SVG_NS2, "polygon");
-      hex.setAttribute("points", points);
-      this.applyShapeStyle(hex, fill, fillOpacity, stroke, strokeWidth);
-      return hex;
-    }
-    const ellipse = document.createElementNS(SVG_NS2, "ellipse");
-    ellipse.setAttribute("cx", String(cx));
-    ellipse.setAttribute("cy", String(topY + h / 2));
-    ellipse.setAttribute("rx", String(halfW));
-    ellipse.setAttribute("ry", String(h / 2));
-    this.applyShapeStyle(ellipse, fill, fillOpacity, stroke, strokeWidth);
-    return ellipse;
-  }
-  applyShapeStyle(el, fill, fillOpacity, stroke, strokeWidth) {
-    el.setAttribute("fill", fill);
-    el.setAttribute("fill-opacity", fillOpacity);
-    el.setAttribute("stroke", stroke);
-    el.setAttribute("stroke-width", strokeWidth);
+  buildNodeShape(size, cx, topY, outerRadius, fill, isFiltered, isSelected) {
+    const g = document.createElementNS(SVG_NS2, "g");
+    const cy = topY + outerRadius;
+    const rings = nodeRingsForSize(size);
+    rings.forEach((ring, index) => {
+      const circle = document.createElementNS(SVG_NS2, "circle");
+      circle.setAttribute("cx", String(cx));
+      circle.setAttribute("cy", String(cy));
+      circle.setAttribute("r", String(ring.r));
+      circle.setAttribute("fill", fill);
+      circle.setAttribute("fill-opacity", String(isFiltered ? ring.opacity * 0.25 : ring.opacity));
+      const isOutermost = index === 0;
+      if (isOutermost && isSelected) {
+        circle.setAttribute("stroke", COLOR.nodeStroke);
+        circle.setAttribute("stroke-width", "2.5");
+      } else {
+        circle.setAttribute("stroke", "none");
+        circle.setAttribute("stroke-width", "0");
+      }
+      g.appendChild(circle);
+    });
+    return g;
   }
   drawNode(node, isFiltered, isSelected, ctx) {
     const g = document.createElementNS(SVG_NS2, "g");
@@ -3385,21 +3380,19 @@ var TimelineRenderer = class {
     g.setAttribute("role", "button");
     g.setAttribute("aria-label", node.event.displayTitle || node.event.date || "\u30A4\u30D9\u30F3\u30C8");
     const text = this.dayLabel(node);
-    const fontSize = this.estimateFontSize(node);
-    const w = this.estimateClampedPillWidth(node);
+    const fontSize = this.estimateFontSize();
     const h = node.radius * 2;
-    const centerY = node.y + h / 2;
+    const w = h;
+    const centerY = node.y + node.radius;
     const colors = ctx.resolveNodeColors(node.event);
     const shape = this.buildNodeShape(
       node.event.size,
       node.x,
       node.y,
-      w,
-      h,
+      node.radius,
       isFiltered ? COLOR.nodeFiltered : colors.nodeColor,
-      isFiltered ? "0.25" : "1",
-      isSelected ? COLOR.nodeStroke : "none",
-      isSelected ? "2.5" : "0"
+      isFiltered,
+      isSelected
     );
     g.appendChild(shape);
     if (!isFiltered) {
@@ -3412,6 +3405,12 @@ var TimelineRenderer = class {
       label.setAttribute("font-size", String(fontSize));
       label.setAttribute("font-weight", "600");
       label.setAttribute("fill", colors.textColor || COLOR.nodeTextLight);
+      const availableTextW = Math.max(6, baseNodeRadius() * 2 - NODE_LABEL_PADDING * 2);
+      const estimatedTextWidth = text.length * fontSize * 0.62 + fontSize * 0.3;
+      if (estimatedTextWidth > availableTextW) {
+        label.setAttribute("textLength", String(availableTextW.toFixed(1)));
+        label.setAttribute("lengthAdjust", "spacingAndGlyphs");
+      }
       label.textContent = text;
       g.appendChild(label);
     }
