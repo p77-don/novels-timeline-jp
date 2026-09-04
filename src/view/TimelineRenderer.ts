@@ -115,7 +115,8 @@ export class TimelineRenderer {
     const gapColW    = GAP_COL_W;
     const lanesStartX = LANES_START_X;
     const colW       = LANE_COL_W;
-    const axisX      = AXIS_X; // 時間軸（垂直線）の位置
+    const axisX      = virtualWindow.scrollLeft + AXIS_X; // 時間軸（垂直線）の位置。年・月・GAP列見出しと同様、
+                                                            // 水平スクロールに追従して常に左側へ固定表示する。
     this._lastLaneCount = laneCount;
 
     this.svg.setAttribute("viewBox", `0 0 ${totalWidth} ${totalHeight}`);
@@ -140,18 +141,24 @@ export class TimelineRenderer {
 
     // ① レーン列の背景（縞模様）と区切り線
     this.drawLaneColumns(totalHeight, lanesStartX, colW, laneCount);
-    // ② GAP専用列の背景（月列とレーン列の間）
+    // ② 関係線（ノードより先に描画）
+    this.drawRelations(ctx, visTop, visBottom);
+    // ③ ノード（日にちバッジ）
+    this.drawNodes(ctx, visTop, visBottom, visLeft, visRight);
+    // ─────────────────────────────────────────────────────────
+    // ここから下は「左側固定列」（年・月・時間軸・GAP）。
+    // 水平スクロールに追従して常に同じ画面位置に再描画されるため、
+    // 下に隠れる形になるレーンの関係線・ノードより後に描画し、
+    // 不透明の背景で覆い隠す（透けて見えるのを防ぐ）。
+    // ─────────────────────────────────────────────────────────
+    // ④ GAP専用列の背景（月列とレーン列の間）
     this.drawGapColumnBackground(totalHeight, axisX, gapColW);
-    // ③ 時間軸（垂直線）
+    // ⑤ 時間軸（垂直線）
     this.drawTimeAxis(axisX, totalHeight);
-    // ④ Gap（GAP専用列内に表示）
+    // ⑥ Gap（GAP専用列内に表示）
     if (settings.gapCompression) {
       this.drawGaps(ctx, visTop, visBottom, axisX, gapColW);
     }
-    // ⑤ 関係線（ノードより先に描画）
-    this.drawRelations(ctx, visTop, visBottom);
-    // ⑥ ノード（日にちバッジ）
-    this.drawNodes(ctx, visTop, visBottom, visLeft, visRight);
     // ⑦ 年・月ラベル（左側固定列・スクロール追従で常に左端固定表示）
     this.drawDateColumn(ctx, visTop, visBottom, virtualWindow.scrollLeft);
     // ⑧ レーン番号ヘッダー行（上部固定・スクロール追従）
@@ -180,6 +187,17 @@ export class TimelineRenderer {
   // ----------------------------------------------------------
 
   private drawGapColumnBackground(totalHeight: number, axisX: number, gapColW: number): void {
+    // 不透明の下地（水平スクロールで固定表示されるため、下に隠れるレーン内容が
+    // 透けて見えないようにする。年・月列と同じ考え方）。
+    const base = document.createElementNS(SVG_NS, "rect");
+    base.setAttribute("x",      String(axisX));
+    base.setAttribute("y",      "0");
+    base.setAttribute("width",  String(gapColW));
+    base.setAttribute("height", String(totalHeight));
+    base.setAttribute("fill",   "var(--background-primary-alt)");
+    this.svg.appendChild(base);
+
+    // 見た目の色味（従来からの半透明の帯）。下地の上に重ねる。
     const bg = document.createElementNS(SVG_NS, "rect");
     bg.setAttribute("x",      String(axisX));
     bg.setAttribute("y",      "0");

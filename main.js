@@ -2999,7 +2999,7 @@ var TimelineRenderer = class {
     const gapColW = GAP_COL_W;
     const lanesStartX = LANES_START_X;
     const colW = LANE_COL_W;
-    const axisX = AXIS_X;
+    const axisX = virtualWindow.scrollLeft + AXIS_X;
     this._lastLaneCount = laneCount;
     this.svg.setAttribute("viewBox", `0 0 ${totalWidth} ${totalHeight}`);
     this.svg.setAttribute("width", String(totalWidth));
@@ -3015,13 +3015,13 @@ var TimelineRenderer = class {
     const defs = document.createElementNS(SVG_NS2, "defs");
     this.svg.appendChild(defs);
     this.drawLaneColumns(totalHeight, lanesStartX, colW, laneCount);
+    this.drawRelations(ctx, visTop, visBottom);
+    this.drawNodes(ctx, visTop, visBottom, visLeft, visRight);
     this.drawGapColumnBackground(totalHeight, axisX, gapColW);
     this.drawTimeAxis(axisX, totalHeight);
     if (settings.gapCompression) {
       this.drawGaps(ctx, visTop, visBottom, axisX, gapColW);
     }
-    this.drawRelations(ctx, visTop, visBottom);
-    this.drawNodes(ctx, visTop, visBottom, visLeft, visRight);
     this.drawDateColumn(ctx, visTop, visBottom, virtualWindow.scrollLeft);
     this.drawLaneHeaderRow(lanesStartX, colW, laneCount, headerH, virtualWindow.scrollTop);
     this.drawCornerHeader(virtualWindow.scrollLeft, virtualWindow.scrollTop, headerH, (_a = settings.calendar.name) != null ? _a : "");
@@ -3041,6 +3041,13 @@ var TimelineRenderer = class {
   // GAP専用列の背景（時間軸とレーン列の間の帯）
   // ----------------------------------------------------------
   drawGapColumnBackground(totalHeight, axisX, gapColW) {
+    const base = document.createElementNS(SVG_NS2, "rect");
+    base.setAttribute("x", String(axisX));
+    base.setAttribute("y", "0");
+    base.setAttribute("width", String(gapColW));
+    base.setAttribute("height", String(totalHeight));
+    base.setAttribute("fill", "var(--background-primary-alt)");
+    this.svg.appendChild(base);
     const bg = document.createElementNS(SVG_NS2, "rect");
     bg.setAttribute("x", String(axisX));
     bg.setAttribute("y", "0");
