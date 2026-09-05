@@ -1,6 +1,6 @@
 {
   "name": "novels-timeline-jp",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "小説の出来事を時系列で可視化するObsidianプラグイン",
   "main": "dist/main.js",
   "scripts": {
